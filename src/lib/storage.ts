@@ -392,20 +392,38 @@ export async function deleteTimetableEntry(id: string): Promise<void> {
   setLocal(STORAGE_KEYS.TIMETABLE, all);
 }
 
+// Helper to clean objects for Firestore (removes undefined fields)
+function cleanForFirestore<T extends Record<string, any>>(obj: T): any {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 // ==================== 7. ATTENDANCE LOGS ====================
 
 export async function getAttendanceLogs(termId?: string): Promise<AttendanceRecord[]> {
   if (db) {
     try {
       const q = termId
-        ? query(collection(db, "attendance_logs"), where("termId", "==", termId), orderBy("date", "desc"))
-        : query(collection(db, "attendance_logs"), orderBy("date", "desc"));
+        ? query(collection(db, "attendance_logs"), where("termId", "==", termId))
+        : collection(db, "attendance_logs");
       const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        return snapshot.docs.map((d) => d.data() as AttendanceRecord);
+      const list = snapshot.docs.map((d) => d.data() as AttendanceRecord);
+      list.sort(
+        (a, b) =>
+          (b.date || "").localeCompare(a.date || "") ||
+          (b.periodStart || 0) - (a.periodStart || 0)
+      );
+      if (list.length > 0) {
+        setLocal(STORAGE_KEYS.ATTENDANCE, list);
+        return list;
       }
     } catch (e) {
-      console.warn(e);
+      console.warn("getAttendanceLogs error:", e);
     }
   }
   const all = getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
@@ -415,13 +433,38 @@ export async function getAttendanceLogs(termId?: string): Promise<AttendanceReco
 export async function addAttendanceLog(record: AttendanceRecord): Promise<void> {
   if (db) {
     try {
-      await setDoc(doc(db, "attendance_logs", record.id), record);
+      const cleanRecord = cleanForFirestore(record);
+      await setDoc(doc(db, "attendance_logs", record.id), cleanRecord);
     } catch (e) {
-      console.error(e);
+      console.error("Firestore addAttendanceLog error:", e);
     }
   }
   const all = getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
-  all.unshift(record);
+  const idx = all.findIndex((a) => a.id === record.id);
+  if (idx >= 0) {
+    all[idx] = record;
+  } else {
+    all.unshift(record);
+  }
+  setLocal(STORAGE_KEYS.ATTENDANCE, all);
+}
+
+export async function updateAttendanceLog(record: AttendanceRecord): Promise<void> {
+  if (db) {
+    try {
+      const cleanRecord = cleanForFirestore(record);
+      await setDoc(doc(db, "attendance_logs", record.id), cleanRecord, { merge: true });
+    } catch (e) {
+      console.error("Firestore updateAttendanceLog error:", e);
+    }
+  }
+  const all = getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
+  const idx = all.findIndex((a) => a.id === record.id);
+  if (idx >= 0) {
+    all[idx] = record;
+  } else {
+    all.unshift(record);
+  }
   setLocal(STORAGE_KEYS.ATTENDANCE, all);
 }
 
@@ -439,13 +482,29 @@ export async function deleteAttendanceLog(id: string): Promise<void> {
 
 // Real-time subscription for attendance logs
 export function subscribeAttendance(callback: (records: AttendanceRecord[]) => void): () => void {
+  // Immediately provide cached data first for 0ms latency
+  const cached = getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
+  callback(cached);
+
   if (db) {
     try {
-      const q = query(collection(db, "attendance_logs"), orderBy("date", "desc"));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const records = snapshot.docs.map((d) => d.data() as AttendanceRecord);
-        callback(records);
-      });
+      const q = collection(db, "attendance_logs");
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const records = snapshot.docs.map((d) => d.data() as AttendanceRecord);
+          records.sort(
+            (a, b) =>
+              (b.date || "").localeCompare(a.date || "") ||
+              (b.periodStart || 0) - (a.periodStart || 0)
+          );
+          setLocal(STORAGE_KEYS.ATTENDANCE, records);
+          callback(records);
+        },
+        (error) => {
+          console.warn("Firestore subscription error:", error);
+        }
+      );
       return unsubscribe;
     } catch (e) {
       console.warn("Firestore subscription failed, fallback to local:", e);
@@ -455,7 +514,6 @@ export function subscribeAttendance(callback: (records: AttendanceRecord[]) => v
   const update = () => {
     callback(getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE));
   };
-  update();
   return subscribe(STORAGE_KEYS.ATTENDANCE, update);
 }
 

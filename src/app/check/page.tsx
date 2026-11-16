@@ -18,6 +18,8 @@ import {
   Info,
   QrCode,
   Bell,
+  Edit3,
+  RotateCcw,
 } from "lucide-react";
 import {
   getClassrooms,
@@ -27,7 +29,9 @@ import {
   getTeachers,
   getSubjects,
   addAttendanceLog,
+  updateAttendanceLog,
   getAttendanceLogs,
+  subscribeAttendance,
   getSubstituteAssignments,
 } from "@/lib/storage";
 import {
@@ -137,6 +141,21 @@ export default function StudentCheckPage() {
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [autoDetectedNotice, setAutoDetectedNotice] = useState<string | null>(null);
   const [roomTodayLogs, setRoomTodayLogs] = useState<AttendanceRecord[]>([]);
+  const [allRoomLogs, setAllRoomLogs] = useState<AttendanceRecord[]>([]);
+  const [historyTab, setHistoryTab] = useState<"day" | "week">("day");
+  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
+
+  // Helper: check if a record's date is within 7 days
+  const isWithin7Days = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length < 3) return false;
+    const recordDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.floor((today.getTime() - recordDate.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays >= -1 && diffDays <= 7;
+  };
 
   // Current Thai Time clock
   const [currentTimeStr, setCurrentTimeStr] = useState("");
@@ -243,21 +262,63 @@ export default function StudentCheckPage() {
     init();
   }, []);
 
-  // Refresh logs for this room
+  // Real-time online synchronization of attendance logs for this room
   useEffect(() => {
     if (isRoomAuthenticated && selectedRoomId) {
-      loadRoomLogs();
+      const unsubscribe = subscribeAttendance((allRecords) => {
+        const roomLogs = allRecords.filter((l) => l.classroomId === selectedRoomId);
+        setAllRoomLogs(roomLogs);
+        const todayLogs = roomLogs.filter((l) => l.date === checkDate);
+        setRoomTodayLogs(todayLogs);
+      });
+      return () => unsubscribe();
     }
   }, [isRoomAuthenticated, selectedRoomId, checkDate]);
 
   async function loadRoomLogs() {
     if (!activeTerm) return;
     const allLogs = await getAttendanceLogs(activeTerm.id);
-    const roomLogs = allLogs.filter(
-      (l) => l.classroomId === selectedRoomId && l.date === checkDate
-    );
-    setRoomTodayLogs(roomLogs);
+    const roomLogs = allLogs.filter((l) => l.classroomId === selectedRoomId);
+    setAllRoomLogs(roomLogs);
+    setRoomTodayLogs(roomLogs.filter((l) => l.date === checkDate));
   }
+
+  // Room logs within 7 days that are eligible for editing
+  const room7DaysLogs = useMemo(() => {
+    return allRoomLogs.filter((l) => isWithin7Days(l.date));
+  }, [allRoomLogs]);
+
+  // Start editing a record (allowed within 7 days)
+  const handleStartEdit = (record: AttendanceRecord) => {
+    if (!isWithin7Days(record.date)) {
+      alert("รายการนี้ถูกบันทึกเกิน 7 วันแล้ว ไม่สามารถแก้ไขได้ (ตามระเบียบโรงเรียน)");
+      return;
+    }
+    setEditingRecord(record);
+    setCheckDate(record.date);
+    setIsDoublePeriod(record.periodStart !== record.periodEnd);
+    setPeriodStart(record.periodStart);
+    setPeriodEnd(record.periodEnd);
+    setSelectedSubjectId(record.subjectId);
+    setSelectedTeacherId(record.teacherId);
+    setStatus(record.status);
+    setAbsenceReason(record.absenceReason || "");
+    setAbsenceNote(record.absenceNote || "");
+
+    // Scroll smoothly to form
+    const formEl = document.getElementById("checkin-form");
+    if (formEl) {
+      formEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  // Cancel edit mode
+  const handleCancelEdit = () => {
+    setEditingRecord(null);
+    setStatus("");
+    setAbsenceReason("");
+    setAbsenceNote("");
+  };
 
   // Handle Room Login
   const handleRoomLogin = (e: React.FormEvent) => {
@@ -684,33 +745,64 @@ export default function StudentCheckPage() {
           selectedTeacherId === currentSubstitute.substituteTeacherId
       );
 
-      const newRecord: AttendanceRecord = {
-        id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        termId: activeTerm?.id || "term_default",
-        date: checkDate,
-        dayOfWeek,
-        periodStart,
-        periodEnd,
-        periodCount,
-        classroomId: selectedRoomId,
-        gradeRoom: room?.gradeRoom || "ห้องเรียน",
-        subjectId: selectedSubjectId,
-        subjectCode: subject?.code || "",
-        subjectName: subject?.name || "",
-        teacherId: selectedTeacherId,
-        teacherName: teacher ? `${teacher.prefix}${teacher.fullName}` : "ไม่ระบุ",
-        status,
-        absenceReason: status === "absent" ? (absenceReason as AbsenceReason) : undefined,
-        absenceNote: status === "absent" ? absenceNote.trim() : undefined,
-        recordedByStudent: studentName.trim(),
-        isSubstitute: isSub,
-        originalTeacherId: isSub ? currentSubstitute?.originalTeacherId : undefined,
-        originalTeacherName: isSub ? currentSubstitute?.originalTeacherName : undefined,
-        substituteAssignmentId: isSub ? currentSubstitute?.id : undefined,
-        createdAt: new Date().toISOString(),
-      };
+      if (editingRecord) {
+        // Updating existing record within 7 days
+        const updatedRecord: AttendanceRecord = {
+          ...editingRecord,
+          date: checkDate,
+          dayOfWeek,
+          periodStart,
+          periodEnd,
+          periodCount,
+          classroomId: selectedRoomId,
+          gradeRoom: room?.gradeRoom || editingRecord.gradeRoom,
+          subjectId: selectedSubjectId,
+          subjectCode: subject?.code || editingRecord.subjectCode,
+          subjectName: subject?.name || editingRecord.subjectName,
+          teacherId: selectedTeacherId,
+          teacherName: teacher ? `${teacher.prefix}${teacher.fullName}` : editingRecord.teacherName,
+          status,
+          absenceReason: status === "absent" ? (absenceReason as AbsenceReason) : undefined,
+          absenceNote: status === "absent" ? absenceNote.trim() : undefined,
+          isSubstitute: isSub,
+          originalTeacherId: isSub ? currentSubstitute?.originalTeacherId : undefined,
+          originalTeacherName: isSub ? currentSubstitute?.originalTeacherName : undefined,
+          substituteAssignmentId: isSub ? currentSubstitute?.id : undefined,
+          updatedAt: new Date().toISOString(),
+          updatedByStudent: studentName.trim(),
+        };
 
-      await addAttendanceLog(newRecord);
+        await updateAttendanceLog(updatedRecord);
+        setEditingRecord(null);
+      } else {
+        const newRecord: AttendanceRecord = {
+          id: `att_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          termId: activeTerm?.id || "term_default",
+          date: checkDate,
+          dayOfWeek,
+          periodStart,
+          periodEnd,
+          periodCount,
+          classroomId: selectedRoomId,
+          gradeRoom: room?.gradeRoom || "ห้องเรียน",
+          subjectId: selectedSubjectId,
+          subjectCode: subject?.code || "",
+          subjectName: subject?.name || "",
+          teacherId: selectedTeacherId,
+          teacherName: teacher ? `${teacher.prefix}${teacher.fullName}` : "ไม่ระบุ",
+          status,
+          absenceReason: status === "absent" ? (absenceReason as AbsenceReason) : undefined,
+          absenceNote: status === "absent" ? absenceNote.trim() : undefined,
+          recordedByStudent: studentName.trim(),
+          isSubstitute: isSub,
+          originalTeacherId: isSub ? currentSubstitute?.originalTeacherId : undefined,
+          originalTeacherName: isSub ? currentSubstitute?.originalTeacherName : undefined,
+          substituteAssignmentId: isSub ? currentSubstitute?.id : undefined,
+          createdAt: new Date().toISOString(),
+        };
+
+        await addAttendanceLog(newRecord);
+      }
 
       setSubmitSuccess(true);
       await loadRoomLogs();
@@ -1034,14 +1126,46 @@ export default function StudentCheckPage() {
               <div>
                 <p className="font-bold text-sm">บันทึกข้อมูลเรียบร้อยแล้ว!</p>
                 <p className="text-xs text-emerald-700 mt-0.5">
-                  ข้อมูลถูกบันทึกเข้าระบบสถิติส่วนกลางทันที สามารถบันทึกคาบต่อไปได้เลย
+                  ข้อมูลถูกบันทึกและซิงค์ออนไลน์ไปยังฐานข้อมูลกลางทันที
                 </p>
               </div>
             </div>
           )}
 
+          {/* Edit Mode Alert Banner */}
+          {editingRecord && (
+            <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 flex flex-wrap items-center justify-between gap-3 shadow-md animate-in fade-in duration-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center shrink-0 shadow-inner">
+                  <Edit3 className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <div className="font-bold text-sm sm:text-base text-amber-950 flex items-center gap-2">
+                    <span>โหมดแก้ไขข้อมูลการเข้าสอน</span>
+                    <span className="text-[11px] bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full font-semibold">
+                      แก้ไขได้ภายใน 7 วัน
+                    </span>
+                  </div>
+                  <div className="text-xs text-amber-800 mt-0.5">
+                    กำลังแก้ไขวิชา <strong>{editingRecord.subjectCode} {editingRecord.subjectName}</strong> &bull; วันที่ {editingRecord.date} &bull; คาบ {editingRecord.periodStart === editingRecord.periodEnd ? editingRecord.periodStart : `${editingRecord.periodStart}-${editingRecord.periodEnd}`}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-white text-slate-700 hover:bg-slate-100 active:scale-95 border border-slate-300 shadow-sm transition-all flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                <span>ยกเลิกการแก้ไข</span>
+              </button>
+            </div>
+          )}
+
           {/* The Check-in Form */}
           <form
+            id="checkin-form"
             onSubmit={handleSubmitAttendance}
             className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6"
           >
@@ -1597,83 +1721,181 @@ export default function StudentCheckPage() {
             </div>
 
             {/* Submit Button */}
-            <div className="border-t border-slate-100 pt-6 flex justify-end">
+            <div className="border-t border-slate-100 pt-6 flex flex-wrap items-center justify-between gap-3">
+              {editingRecord && (
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 active:scale-95 font-semibold text-sm flex items-center gap-2 transition-all shadow-xs"
+                >
+                  <RotateCcw className="w-4 h-4 text-slate-500" />
+                  <span>ยกเลิกโหมดแก้ไข</span>
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-sky-600/25 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+                className={`w-full sm:w-auto px-8 py-3 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 active:scale-95 ${
+                  editingRecord
+                    ? "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-600/30 ml-auto"
+                    : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 shadow-sky-600/25 ml-auto"
+                }`}
               >
-                <Send className="w-4 h-4" />
-                <span>{submitting ? "กำลังบันทึก..." : "ยืนยันบันทึกการเข้าสอน"}</span>
+                {editingRecord ? <Edit3 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                <span>
+                  {submitting
+                    ? "กำลังบันทึก..."
+                    : editingRecord
+                    ? "บันทึกการแก้ไขข้อมูล"
+                    : "ยืนยันบันทึกการเข้าสอน"}
+                </span>
               </button>
             </div>
           </form>
 
-          {/* Section 4: Today's Log for this room */}
+          {/* Section 4: Room Log History & 7-Day Edit */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 border-b border-slate-100 pb-3 gap-3">
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-sky-600" />
                 <h3 className="font-bold text-slate-800 text-sm sm:text-base">
-                  ประวัติที่ห้อง {currentRoom?.gradeRoom} บันทึกแล้วในวันที่ {checkDate}
+                  ประวัติการบันทึกของห้อง {currentRoom?.gradeRoom}
                 </h3>
               </div>
-              <span className="text-xs text-slate-500 font-medium">
-                {roomTodayLogs.length} รายการ
-              </span>
+
+              {/* History Switcher Tabs */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setHistoryTab("day")}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    historyTab === "day"
+                      ? "bg-white text-sky-700 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  วันที่เลือก ({roomTodayLogs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryTab("week")}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    historyTab === "week"
+                      ? "bg-white text-amber-800 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  ย้อนหลัง 7 วันที่แก้ไขได้ ({room7DaysLogs.length})
+                </button>
+              </div>
             </div>
 
-            {roomTodayLogs.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-sm">
-                ยังไม่มีการบันทึกข้อมูลของห้องนี้ในวันที่เลือก
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {roomTodayLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-bold text-xs shrink-0">
-                        {log.periodStart === log.periodEnd
-                          ? `คาบ ${log.periodStart}`
-                          : `คาบ ${log.periodStart}-${log.periodEnd}`}
-                      </span>
-                      <div>
-                        <div className="font-semibold text-slate-800">
-                          {log.subjectCode} {log.subjectName}
+            {/* Logs List */}
+            {(() => {
+              const displayLogs = historyTab === "day" ? roomTodayLogs : room7DaysLogs;
+              if (displayLogs.length === 0) {
+                return (
+                  <div className="text-center py-8 text-slate-400 text-sm">
+                    {historyTab === "day"
+                      ? `ยังไม่มีการบันทึกข้อมูลของห้องนี้ในวันที่ ${checkDate}`
+                      : "ยังไม่มีประวัติการบันทึกข้อมูลย้อนหลัง 7 วันของห้องนี้"}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="divide-y divide-slate-100">
+                  {displayLogs.map((log) => {
+                    const canEdit = isWithin7Days(log.date);
+                    const isCurrentlyEditing = editingRecord?.id === log.id;
+                    return (
+                      <div
+                        key={log.id}
+                        className={`py-3.5 px-3 rounded-xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm ${
+                          isCurrentlyEditing
+                            ? "bg-amber-50 border border-amber-200"
+                            : "hover:bg-slate-50/80"
+                        }`}
+                      >
+                        <div className="flex items-start sm:items-center gap-3">
+                          <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-bold text-xs shrink-0 mt-0.5 sm:mt-0">
+                            {log.periodStart === log.periodEnd
+                              ? `คาบ ${log.periodStart}`
+                              : `คาบ ${log.periodStart}-${log.periodEnd}`}
+                          </span>
+                          <div>
+                            <div className="font-semibold text-slate-800 flex flex-wrap items-center gap-1.5">
+                              <span>
+                                {log.subjectCode} {log.subjectName}
+                              </span>
+                              {historyTab === "week" && (
+                                <span className="text-[11px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                  {formatThaiDateLong(log.date)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              ครูผู้สอน: <strong>{log.teacherName}</strong> &bull; บันทึกโดย: {log.recordedByStudent}
+                              {log.updatedAt && (
+                                <span className="text-amber-700 ml-1.5 font-medium">
+                                  (แก้ไขเมื่อ: {new Date(log.updatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.)
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs text-slate-500">
-                          ครูผู้สอน: {log.teacherName} &bull; บันทึกโดย: {log.recordedByStudent}
+
+                        <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 flex-wrap">
+                          {log.status === "on_time" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              ตรงเวลา
+                            </span>
+                          )}
+                          {log.status === "late" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                              สาย &gt;10 นาที
+                            </span>
+                          )}
+                          {log.status === "absent" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">
+                              <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                              ไม่เข้าสอน ({log.absenceReason === "meeting" ? "ประชุม" : log.absenceReason === "activity" ? "กิจกรรมสำคัญ" : log.absenceReason === "official" ? "ไปราชการ" : log.absenceReason === "personal" ? "ลากิจ" : log.absenceReason === "sick" ? "ลาป่วย" : log.absenceNote || "เหตุผลอื่นๆ"})
+                            </span>
+                          )}
+
+                          {/* 7-Day Edit Button */}
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(log)}
+                              className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                                isCurrentlyEditing
+                                  ? "bg-amber-600 text-white shadow-xs"
+                                  : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 active:scale-95"
+                              }`}
+                              title="แก้ไขข้อมูลการบันทึก (ภายใน 7 วัน)"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              <span>{isCurrentlyEditing ? "กำลังแก้ไข" : "แก้ไข"}</span>
+                            </button>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium bg-slate-100 text-slate-400 border border-slate-200"
+                              title="บันทึกเกิน 7 วันแล้ว ไม่สามารถแก้ไขได้"
+                            >
+                              <Lock className="w-3 h-3" />
+                              <span>เกิน 7 วัน</span>
+                            </span>
+                          )}
                         </div>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 self-start sm:self-auto">
-                      {log.status === "on_time" && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                          ตรงเวลา
-                        </span>
-                      )}
-                      {log.status === "late" && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                          สาย &gt;10 นาที
-                        </span>
-                      )}
-                      {log.status === "absent" && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">
-                          <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                          ไม่เข้าสอน ({log.absenceReason === "meeting" ? "ประชุม" : log.absenceReason === "activity" ? "กิจกรรมสำคัญ" : log.absenceReason === "official" ? "ไปราชการ" : log.absenceReason === "personal" ? "ลากิจ" : log.absenceReason === "sick" ? "ลาป่วย" : log.absenceNote || "เหตุผลอื่นๆ"})
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

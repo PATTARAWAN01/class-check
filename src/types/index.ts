@@ -109,6 +109,8 @@ export interface AttendanceRecord {
   originalTeacherName?: string;
   substituteAssignmentId?: string;
   createdAt: string;
+  updatedAt?: string;
+  updatedByStudent?: string;
 }
 
 export interface Signer {
