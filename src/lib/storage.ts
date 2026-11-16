@@ -182,15 +182,20 @@ export async function getClassrooms(): Promise<Classroom[]> {
   if (db) {
     try {
       const snapshot = await getDocs(collection(db, "classrooms"));
-      if (!snapshot.empty) {
+      if (!snapshot.empty && snapshot.size >= 20) {
         return snapshot.docs.map((d) => d.data() as Classroom);
       }
+      // If Firestore has fewer than 20 classrooms (e.g. unseeded or partial), seed all INITIAL_CLASSROOMS
+      const batch = writeBatch(db);
+      INITIAL_CLASSROOMS.forEach((c) => batch.set(doc(db!, "classrooms", c.id), c));
+      await batch.commit();
+      return INITIAL_CLASSROOMS;
     } catch (e) {
       console.warn(e);
     }
   }
   const local = getLocal<Classroom[]>(STORAGE_KEYS.CLASSROOMS, INITIAL_CLASSROOMS);
-  if (local.length < 20) {
+  if (!local || local.length < 20) {
     setLocal(STORAGE_KEYS.CLASSROOMS, INITIAL_CLASSROOMS);
     return INITIAL_CLASSROOMS;
   }
