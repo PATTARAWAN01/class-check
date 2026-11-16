@@ -29,6 +29,7 @@ import {
 import { exportAttendanceToExcel } from "@/lib/excel";
 import { AcademicTerm, Teacher, AttendanceRecord, SchoolProfile, SubstituteAssignment, SubstituteLeaveType } from "@/types";
 import { DEPARTMENTS } from "@/lib/constants";
+import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
 
 type TimeFilter = "today" | "week" | "month" | "term" | "custom";
 
@@ -43,16 +44,10 @@ export default function StatisticsPage() {
   // View Mode: Regular Teaching Attendance vs Substitute Teaching Stats
   const [statViewMode, setStatViewMode] = useState<"attendance" | "substitute">("attendance");
 
-  // Filters
+  // Filters (in Thai Bangkok Timezone UTC+7)
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("today");
-  const [customStartDate, setCustomStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    return d.toISOString().split("T")[0];
-  });
-  const [customEndDate, setCustomEndDate] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
+  const [customStartDate, setCustomStartDate] = useState(() => getThaiOffsetDate(7));
+  const [customEndDate, setCustomEndDate] = useState(() => getThaiDateString());
   const [searchTeacher, setSearchTeacher] = useState("");
   const [selectedDept, setSelectedDept] = useState("all");
 
@@ -102,15 +97,12 @@ export default function StatisticsPage() {
 
     let list = allAttendance.filter((r) => r.termId === selectedTermId);
 
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    const todayStr = getThaiDateString();
 
     if (timeFilter === "today") {
       list = list.filter((r) => r.date === todayStr);
     } else if (timeFilter === "week") {
-      const weekAgo = new Date();
-      weekAgo.setDate(now.getDate() - 7);
-      const weekAgoStr = weekAgo.toISOString().split("T")[0];
+      const weekAgoStr = getThaiOffsetDate(7);
       list = list.filter((r) => r.date >= weekAgoStr && r.date <= todayStr);
     } else if (timeFilter === "month") {
       const currentYearMonth = todayStr.substring(0, 7);
@@ -129,15 +121,12 @@ export default function StatisticsPage() {
       list = list.filter((s) => !s.termId || s.termId === selectedTermId);
     }
 
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    const todayStr = getThaiDateString();
 
     if (timeFilter === "today") {
       list = list.filter((s) => s.date === todayStr);
     } else if (timeFilter === "week") {
-      const weekAgo = new Date();
-      weekAgo.setDate(now.getDate() - 7);
-      const weekAgoStr = weekAgo.toISOString().split("T")[0];
+      const weekAgoStr = getThaiOffsetDate(7);
       list = list.filter((s) => s.date >= weekAgoStr && s.date <= todayStr);
     } else if (timeFilter === "month") {
       const currentYearMonth = todayStr.substring(0, 7);
@@ -271,7 +260,19 @@ export default function StatisticsPage() {
           records,
         };
       })
-      .sort((a, b) => b.total - a.total); // Sort by most teaching records first
+      .sort((a, b) => {
+        // Enforce permanent sorting by Department order as in database, then by teacher code (T001 - T056)
+        const deptOrderMap = new Map(DEPARTMENTS.map((d, i) => [d, i]));
+        const deptA = a.teacher.department || "";
+        const deptB = b.teacher.department || "";
+        const orderA = deptOrderMap.has(deptA) ? deptOrderMap.get(deptA)! : 999;
+        const orderB = deptOrderMap.has(deptB) ? deptOrderMap.get(deptB)! : 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.teacher.code || "").localeCompare(b.teacher.code || "", undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
   }, [teachers, filteredRecords, searchTeacher, selectedDept]);
 
   // Current active term object

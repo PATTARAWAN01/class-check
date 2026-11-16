@@ -17,7 +17,9 @@ import {
   Plus,
   Trash2,
   Edit2,
+  Edit3,
   CheckCircle2,
+  XCircle,
   AlertTriangle,
   RefreshCw,
   Sparkles,
@@ -29,6 +31,10 @@ import {
   ChevronRight,
   UserCheck,
   CloudUpload,
+  CheckSquare,
+  Square,
+  Filter,
+  ClipboardList,
 } from "lucide-react";
 import Link from "next/link";
 import SubstituteOcrImporter from "@/components/SubstituteOcrImporter";
@@ -53,12 +59,16 @@ import {
   getSchoolProfile,
   saveSchoolProfile,
   getAttendanceLogs,
+  updateAttendanceLog,
+  deleteAttendanceLog,
+  subscribeAttendance,
   resetToSampleData,
   syncAllToFirestore,
   getSubstituteAssignments,
   saveSubstituteAssignment,
   deleteSubstituteAssignment,
 } from "@/lib/storage";
+import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
 import {
   downloadTeacherTemplate,
   parseTeacherExcel,
@@ -87,6 +97,7 @@ import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
 
 type AdminTab =
   | "reports"
+  | "attendance"
   | "substitute"
   | "timetable"
   | "teachers"
@@ -141,31 +152,31 @@ export default function AdminPage() {
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [pdfSelectedTeacherId, setPdfSelectedTeacherId] = useState<string>("all");
   const [pdfTimeRange, setPdfTimeRange] = useState<"custom" | "week" | "month" | "term">("custom");
-  const [pdfStartDate, setPdfStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split("T")[0];
-  });
-  const [pdfEndDate, setPdfEndDate] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
+  const [pdfStartDate, setPdfStartDate] = useState(() => getThaiOffsetDate(30));
+  const [pdfEndDate, setPdfEndDate] = useState(() => getThaiDateString());
   const [pdfTermId, setPdfTermId] = useState<string>("");
   const [classroomGradeFilter, setClassroomGradeFilter] = useState<string>("all");
   const [showQrModal, setShowQrModal] = useState(false);
   const [showSchoolImporter, setShowSchoolImporter] = useState(false);
 
+  // Attendance Records Backend State (Live Real-time Monitoring)
+  const [attSearch, setAttSearch] = useState("");
+  const [attDateFilter, setAttDateFilter] = useState<"today" | "yesterday" | "week" | "month" | "all" | "custom">("today");
+  const [attStartDate, setAttStartDate] = useState(() => getThaiOffsetDate(7));
+  const [attEndDate, setAttEndDate] = useState(() => getThaiDateString());
+  const [attClassroomFilter, setAttClassroomFilter] = useState("all");
+  const [attStatusFilter, setAttStatusFilter] = useState<"all" | "on_time" | "late" | "absent">("all");
+  const [attDeptFilter, setAttDeptFilter] = useState("all");
+  const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
+  const [editingLog, setEditingLog] = useState<AttendanceRecord | null>(null);
+  const [showEditLogModal, setShowEditLogModal] = useState(false);
+
   // Substitute Management State (Admin Centralized)
   const [substitutes, setSubstitutes] = useState<SubstituteAssignment[]>([]);
   const [subTab, setSubTab] = useState<"ocr" | "history">("ocr");
   const [subTimeFilter, setSubTimeFilter] = useState<"today" | "week" | "month" | "all" | "custom">("today");
-  const [subStartDate, setSubStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    return d.toISOString().split("T")[0];
-  });
-  const [subEndDate, setSubEndDate] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
+  const [subStartDate, setSubStartDate] = useState(() => getThaiOffsetDate(7));
+  const [subEndDate, setSubEndDate] = useState(() => getThaiDateString());
   const [subSearch, setSubSearch] = useState("");
   const [subDeptFilter, setSubDeptFilter] = useState("all");
 
@@ -229,19 +240,26 @@ export default function AdminPage() {
     if (active) setPdfTermId(active.id);
   }
 
+  // Real-time listener for attendance logs in Admin
+  useEffect(() => {
+    if (isAuthenticated) {
+      const unsub = subscribeAttendance((records) => {
+        setAttendanceLogs(records);
+      });
+      return () => unsub();
+    }
+  }, [isAuthenticated]);
+
   // Filtered substitute assignments in Admin
   const filteredAdminSubstitutes = useMemo(() => {
     let list = substitutes;
 
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    const todayStr = getThaiDateString();
 
     if (subTimeFilter === "today") {
       list = list.filter((s) => s.date === todayStr);
     } else if (subTimeFilter === "week") {
-      const weekAgo = new Date();
-      weekAgo.setDate(now.getDate() - 7);
-      const weekAgoStr = weekAgo.toISOString().split("T")[0];
+      const weekAgoStr = getThaiOffsetDate(7);
       list = list.filter((s) => s.date >= weekAgoStr && s.date <= todayStr);
     } else if (subTimeFilter === "month") {
       const currentYearMonth = todayStr.substring(0, 7);
@@ -273,6 +291,155 @@ export default function AdminPage() {
 
     return list.sort((a, b) => b.date.localeCompare(a.date) || a.periodStart - b.periodStart);
   }, [substitutes, subTimeFilter, subStartDate, subEndDate, subDeptFilter, subSearch]);
+
+  // Filtered attendance records in Admin Backend
+  const filteredAdminAttendance = useMemo(() => {
+    let list = attendanceLogs;
+    if (pdfTermId) {
+      list = list.filter((r) => !r.termId || r.termId === pdfTermId);
+    }
+
+    const todayStr = getThaiDateString();
+
+    if (attDateFilter === "today") {
+      list = list.filter((r) => r.date === todayStr);
+    } else if (attDateFilter === "yesterday") {
+      const yesterdayStr = getThaiOffsetDate(1);
+      list = list.filter((r) => r.date === yesterdayStr);
+    } else if (attDateFilter === "week") {
+      const weekAgoStr = getThaiOffsetDate(7);
+      list = list.filter((r) => r.date >= weekAgoStr && r.date <= todayStr);
+    } else if (attDateFilter === "month") {
+      const currentYM = todayStr.substring(0, 7);
+      list = list.filter((r) => r.date.startsWith(currentYM));
+    } else if (attDateFilter === "custom") {
+      list = list.filter((r) => r.date >= attStartDate && r.date <= attEndDate);
+    }
+
+    if (attClassroomFilter !== "all") {
+      list = list.filter((r) => r.classroomId === attClassroomFilter || r.gradeRoom === attClassroomFilter);
+    }
+
+    if (attStatusFilter !== "all") {
+      list = list.filter((r) => r.status === attStatusFilter);
+    }
+
+    if (attDeptFilter !== "all") {
+      const deptTeachers = new Set(teachers.filter((t) => t.department === attDeptFilter).map((t) => t.id));
+      list = list.filter((r) => deptTeachers.has(r.teacherId));
+    }
+
+    if (attSearch.trim()) {
+      const q = attSearch.toLowerCase().trim();
+      list = list.filter(
+        (r) =>
+          r.teacherName.toLowerCase().includes(q) ||
+          r.subjectCode.toLowerCase().includes(q) ||
+          r.subjectName.toLowerCase().includes(q) ||
+          (r.recordedByStudent && r.recordedByStudent.toLowerCase().includes(q)) ||
+          r.gradeRoom.toLowerCase().includes(q) ||
+          (r.absenceNote && r.absenceNote.toLowerCase().includes(q))
+      );
+    }
+
+    return list.sort((a, b) => b.date.localeCompare(a.date) || b.periodStart - a.periodStart);
+  }, [
+    attendanceLogs,
+    pdfTermId,
+    attDateFilter,
+    attStartDate,
+    attEndDate,
+    attClassroomFilter,
+    attStatusFilter,
+    attDeptFilter,
+    attSearch,
+    teachers,
+  ]);
+
+  // Admin Attendance Handlers (Delete & Edit)
+  const handleAdminDeleteLog = async (id: string) => {
+    const target = attendanceLogs.find((a) => a.id === id);
+    if (!target) return;
+    if (
+      !window.confirm(
+        `ยืนยันการลบข้อมูลการเข้าสอน คาบที่ ${target.periodStart} (${target.subjectCode} ${target.subjectName}) ห้อง ${target.gradeRoom} วันที่ ${target.date} ใช่หรือไม่?\n(ข้อมูลจะถูกลบออกจากระบบส่วนกลาง)`
+      )
+    )
+      return;
+    try {
+      await deleteAttendanceLog(id);
+      showNotice("ลบรายการบันทึกเรียบร้อยแล้ว", "success");
+      setSelectedLogIds((prev) => prev.filter((i) => i !== id));
+    } catch (e) {
+      console.error(e);
+      showNotice("เกิดข้อผิดพลาดในการลบรายการ", "error");
+    }
+  };
+
+  const handleBatchDeleteLogs = async () => {
+    if (selectedLogIds.length === 0) return;
+    if (
+      !window.confirm(
+        `ยืนยันการลบข้อมูลการเข้าสอนที่เลือกทั้งหมด ${selectedLogIds.length} รายการ ใช่หรือไม่?\n(การกระทำนี้จะลบออกจากระบบส่วนกลางและไม่สามารถย้อนกลับได้)`
+      )
+    )
+      return;
+    try {
+      for (const id of selectedLogIds) {
+        await deleteAttendanceLog(id);
+      }
+      showNotice(`ลบข้อมูล ${selectedLogIds.length} รายการเรียบร้อยแล้ว`, "success");
+      setSelectedLogIds([]);
+    } catch (e) {
+      console.error(e);
+      showNotice("เกิดข้อผิดพลาดในการลบรายการ", "error");
+    }
+  };
+
+  const handleSaveEditLog = async (updated: AttendanceRecord) => {
+    try {
+      await updateAttendanceLog(updated);
+      showNotice("บันทึกการแก้ไขข้อมูลเรียบร้อยแล้ว", "success");
+      setShowEditLogModal(false);
+      setEditingLog(null);
+    } catch (e) {
+      console.error(e);
+      showNotice("เกิดข้อผิดพลาดในการแก้ไขข้อมูล", "error");
+    }
+  };
+
+  const toggleSelectLog = (id: string) => {
+    setSelectedLogIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllLogs = () => {
+    if (selectedLogIds.length === filteredAdminAttendance.length) {
+      setSelectedLogIds([]);
+    } else {
+      setSelectedLogIds(filteredAdminAttendance.map((r) => r.id));
+    }
+  };
+
+  // KPI for filtered admin attendance
+  const adminAttendanceKpis = useMemo(() => {
+    let total = 0;
+    let onTime = 0;
+    let late = 0;
+    let absent = 0;
+    filteredAdminAttendance.forEach((r) => {
+      const cnt = r.periodCount || 1;
+      total += cnt;
+      if (r.status === "on_time") onTime += cnt;
+      else if (r.status === "late") late += cnt;
+      else if (r.status === "absent") absent += cnt;
+    });
+    const onTimePct = total > 0 ? Math.round((onTime / total) * 1000) / 10 : 0;
+    const latePct = total > 0 ? Math.round((late / total) * 1000) / 10 : 0;
+    const absentPct = total > 0 ? Math.round((absent / total) * 1000) / 10 : 0;
+    return { total, onTime, late, absent, onTimePct, latePct, absentPct };
+  }, [filteredAdminAttendance]);
 
   const adminSubKpis = useMemo(() => {
     const totalPeriods = filteredAdminSubstitutes.length;
@@ -339,15 +506,11 @@ export default function AdminPage() {
       if (pdfEndDate && r.date > pdfEndDate) return false;
       return true;
     } else if (pdfTimeRange === "week") {
-      const now = new Date();
-      const todayStr = now.toISOString().split("T")[0];
-      const weekAgo = new Date();
-      weekAgo.setDate(now.getDate() - 7);
-      const weekAgoStr = weekAgo.toISOString().split("T")[0];
+      const todayStr = getThaiDateString();
+      const weekAgoStr = getThaiOffsetDate(7);
       return r.date >= weekAgoStr && r.date <= todayStr;
     } else if (pdfTimeRange === "month") {
-      const now = new Date();
-      const todayStr = now.toISOString().split("T")[0];
+      const todayStr = getThaiDateString();
       const currentYM = todayStr.substring(0, 7);
       return r.date.startsWith(currentYM);
     }
@@ -859,6 +1022,7 @@ export default function AdminPage() {
       <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-sm flex flex-wrap gap-1">
         {[
           { id: "reports", label: "ออกรายงาน PDF / Excel", icon: Printer },
+          { id: "attendance", label: "ตรวจสอบการบันทึกเข้าสอน", icon: ClipboardList },
           { id: "substitute", label: "จัดสอนแทน (OCR & สถิติ)", icon: Sparkles },
           { id: "timetable", label: "ตารางสอน (Excel)", icon: Calendar },
           { id: "teachers", label: "ข้อมูลครูผู้สอน", icon: Users },
@@ -1033,6 +1197,397 @@ export default function AdminPage() {
             <span className="text-slate-400">
               พร้อมส่งออกทั้งรูปแบบ A4 และ Excel Spreadsheet
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================== */}
+      {/* TAB: ATTENDANCE RECORDS MONITORING (ADMIN CENTRALIZED BACKEND) */}
+      {/* ========================================================== */}
+      {activeTab === "attendance" && (
+        <div className="space-y-6">
+          {/* Main Card Header */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-sm">
+                    <ClipboardList className="w-4 h-4" />
+                  </div>
+                  <h2 className="text-base font-bold text-slate-800">
+                    ระบบตรวจสอบการบันทึกเข้าสอนแบบเรียลไทม์ (Live Attendance Feed)
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  ตรวจสอบรายการเข้าสอนที่บันทึกเข้ามาจากทุกห้องเรียน ค้นหา กรองข้อมูล และแก้ไขหรือลบรายการที่บันทึกผิดพลาดได้ทันที
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedLogIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleBatchDeleteLogs}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-sm active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>ลบที่เลือก ({selectedLogIds.length})</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const activeTerm = terms.find((t) => t.id === pdfTermId) || terms[0];
+                    exportAttendanceToExcel(
+                      filteredAdminAttendance,
+                      schoolProfile.schoolName,
+                      `ภาคเรียนที่ ${activeTerm?.term || "2"}/${activeTerm?.year || "2569"}`
+                    );
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-sm active:scale-95"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>ส่งออก Excel ({filteredAdminAttendance.length})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live KPI Summary Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-xs text-slate-500 font-medium">บันทึกทั้งหมด (ช่วงที่เลือก)</div>
+                <div className="text-xl sm:text-2xl font-bold text-slate-800 mt-1">
+                  {adminAttendanceKpis.total}{" "}
+                  <span className="text-xs font-normal text-slate-500">คาบ</span>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200">
+                <div className="text-xs text-emerald-700 font-medium">เข้าสอนตรงเวลา</div>
+                <div className="text-xl sm:text-2xl font-bold text-emerald-800 mt-1">
+                  {adminAttendanceKpis.onTime}{" "}
+                  <span className="text-xs font-semibold text-emerald-600">
+                    ({adminAttendanceKpis.onTimePct}%)
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200">
+                <div className="text-xs text-amber-700 font-medium">เข้าสอนสาย &gt;10 นาที</div>
+                <div className="text-xl sm:text-2xl font-bold text-amber-800 mt-1">
+                  {adminAttendanceKpis.late}{" "}
+                  <span className="text-xs font-semibold text-amber-600">
+                    ({adminAttendanceKpis.latePct}%)
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-rose-50/70 border border-rose-200">
+                <div className="text-xs text-rose-700 font-medium">ไม่เข้าสอน</div>
+                <div className="text-xl sm:text-2xl font-bold text-rose-800 mt-1">
+                  {adminAttendanceKpis.absent}{" "}
+                  <span className="text-xs font-semibold text-rose-600">
+                    ({adminAttendanceKpis.absentPct}%)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter and Search Toolbar */}
+            <div className="space-y-3 p-4 rounded-xl bg-slate-50/80 border border-slate-200 mb-6">
+              {/* Quick Date Buttons */}
+              <div className="flex flex-wrap items-center gap-1.5 pb-2 border-b border-slate-200/80">
+                <span className="text-xs font-bold text-slate-600 mr-2 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  ช่วงเวลา:
+                </span>
+                {[
+                  { id: "today", label: "วันนี้" },
+                  { id: "yesterday", label: "เมื่อวาน" },
+                  { id: "week", label: "7 วันล่าสุด" },
+                  { id: "month", label: "เดือนนี้" },
+                  { id: "all", label: "ทั้งหมด" },
+                  { id: "custom", label: "กำหนดเอง" },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setAttDateFilter(item.id as any)}
+                    className={`px-2.5 py-1 text-xs rounded-lg font-semibold transition-all ${
+                      attDateFilter === item.id
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Advanced Dropdowns & Custom Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                {/* Search */}
+                <div className="md:col-span-2 relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={attSearch}
+                    onChange={(e) => setAttSearch(e.target.value)}
+                    placeholder="ค้นหาชื่อครู, รหัส/ชื่อวิชา, ห้อง, หรือผู้บันทึก..."
+                    className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  {attSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setAttSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Classroom Filter */}
+                <div>
+                  <select
+                    value={attClassroomFilter}
+                    onChange={(e) => setAttClassroomFilter(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="all">-- ทุกห้องเรียน ({classrooms.length} ห้อง) --</option>
+                    {classrooms.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        ห้อง {c.gradeRoom}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status Filter */}
+                <div>
+                  <select
+                    value={attStatusFilter}
+                    onChange={(e) => setAttStatusFilter(e.target.value as any)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="all">-- ทุกสถานะเข้าสอน --</option>
+                    <option value="on_time">เข้าสอนตรงเวลา</option>
+                    <option value="late">เข้าสอนสาย (&gt;10 นาที)</option>
+                    <option value="absent">ไม่เข้าสอน</option>
+                  </select>
+                </div>
+
+                {/* Department Filter */}
+                <div>
+                  <select
+                    value={attDeptFilter}
+                    onChange={(e) => setAttDeptFilter(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white font-medium focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="all">-- ทุกกลุ่มสาระฯ --</option>
+                    {DEPARTMENTS.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept.replace("กลุ่มสาระการเรียนรู้", "สาระฯ ")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Custom Date Pickers */}
+              {attDateFilter === "custom" && (
+                <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-200/80">
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-slate-600 font-medium">ตั้งแต่วันที่:</span>
+                    <input
+                      type="date"
+                      value={attStartDate}
+                      onChange={(e) => setAttStartDate(e.target.value)}
+                      className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-slate-600 font-medium">ถึงวันที่:</span>
+                    <input
+                      type="date"
+                      value={attEndDate}
+                      onChange={(e) => setAttEndDate(e.target.value)}
+                      className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Attendance Table */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200">
+                    <th className="p-3 w-10 text-center">
+                      <button
+                        type="button"
+                        onClick={toggleSelectAllLogs}
+                        className="text-slate-500 hover:text-slate-700"
+                        title="เลือกทั้งหมด"
+                      >
+                        {selectedLogIds.length === filteredAdminAttendance.length && filteredAdminAttendance.length > 0 ? (
+                          <CheckSquare className="w-4 h-4 text-indigo-600" />
+                        ) : (
+                          <Square className="w-4 h-4" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="p-3 whitespace-nowrap">วันที่ / คาบ</th>
+                    <th className="p-3 whitespace-nowrap">ห้องเรียน</th>
+                    <th className="p-3 whitespace-nowrap">วิชาที่สอน</th>
+                    <th className="p-3 whitespace-nowrap">ครูผู้สอน</th>
+                    <th className="p-3 whitespace-nowrap">สถานะการเข้าสอน</th>
+                    <th className="p-3 whitespace-nowrap">ผู้บันทึก / วันเวลา</th>
+                    <th className="p-3 text-center whitespace-nowrap">การจัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredAdminAttendance.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-slate-400">
+                        ไม่พบข้อมูลการเข้าสอนตามเงื่อนไขที่เลือก
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAdminAttendance.map((log) => {
+                      const isSelected = selectedLogIds.includes(log.id);
+                      return (
+                        <tr
+                          key={log.id}
+                          className={`transition-colors ${
+                            isSelected ? "bg-indigo-50/50" : "hover:bg-slate-50/80"
+                          }`}
+                        >
+                          <td className="p-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectLog(log.id)}
+                              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                          </td>
+                          <td className="p-3 whitespace-nowrap font-medium text-slate-800">
+                            <div>{formatThaiDateLong(log.date)}</div>
+                            <div className="text-[11px] text-slate-500 font-mono">
+                              {log.periodStart === log.periodEnd
+                                ? `คาบที่ ${log.periodStart}`
+                                : `คาบคู่ ${log.periodStart}-${log.periodEnd}`}
+                            </div>
+                          </td>
+                          <td className="p-3 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                              {log.gradeRoom}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-800">
+                              {log.subjectCode} {log.subjectName}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-800">
+                              {log.teacherName}
+                            </div>
+                            {log.isSubstitute && (
+                              <div className="text-[11px] text-emerald-700 font-medium">
+                                ⭐ ปฏิบัติหน้าที่สอนแทน
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {log.status === "on_time" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                ตรงเวลา
+                              </span>
+                            )}
+                            {log.status === "late" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+                                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                สาย &gt;10 นาที
+                              </span>
+                            )}
+                            {log.status === "absent" && (
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800">
+                                  <XCircle className="w-3 h-3 text-rose-600" />
+                                  ไม่เข้าสอน (
+                                  {log.absenceReason === "meeting"
+                                    ? "ประชุม"
+                                    : log.absenceReason === "activity"
+                                    ? "กิจกรรมสำคัญ"
+                                    : log.absenceReason === "official"
+                                    ? "ไปราชการ"
+                                    : log.absenceReason === "personal"
+                                    ? "ลากิจ"
+                                    : log.absenceReason === "sick"
+                                    ? "ลาป่วย"
+                                    : log.absenceNote || "เหตุผลอื่นๆ"}
+                                  )
+                                </span>
+                                {log.absenceNote && (
+                                  <div className="text-[10px] text-rose-700 italic">
+                                    หมายเหตุ: {log.absenceNote}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-slate-600">
+                            <div>ผู้บันทึก: <strong>{log.recordedByStudent || "ไม่ระบุ"}</strong></div>
+                            {log.updatedAt && (
+                              <div className="text-[10px] text-amber-700">
+                                แก้ไขเมื่อ: {new Date(log.updatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.
+                                {log.updatedByStudent && ` (${log.updatedByStudent})`}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingLog(log);
+                                  setShowEditLogModal(true);
+                                }}
+                                className="p-1.5 rounded-lg text-amber-700 hover:bg-amber-100 border border-amber-200 transition-all shadow-xs"
+                                title="แก้ไขรายการนี้ (ในฐานะแอดมิน)"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleAdminDeleteLog(log.id)}
+                                className="p-1.5 rounded-lg text-rose-700 hover:bg-rose-100 border border-rose-200 transition-all shadow-xs"
+                                title="ลบรายการนี้"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+              <span>แสดงทั้งหมด {filteredAdminAttendance.length} รายการ</span>
+              {selectedLogIds.length > 0 && (
+                <span className="font-semibold text-indigo-700">
+                  เลือกอยู่ {selectedLogIds.length} รายการ
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2777,6 +3332,238 @@ export default function AdminPage() {
         onClose={() => setShowSchoolImporter(false)}
         onSuccess={loadAllData}
       />
+
+      {/* ========================================================== */}
+      {/* ADMIN EDIT ATTENDANCE RECORD MODAL */}
+      {/* ========================================================== */}
+      {showEditLogModal && editingLog && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base">
+                    แก้ไขข้อมูลการเข้าสอน (สิทธิ์แอดมิน)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    ห้อง {editingLog.gradeRoom} &bull; วันที่ {editingLog.date}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditLogModal(false);
+                  setEditingLog(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSaveEditLog({
+                  ...editingLog,
+                  updatedAt: new Date().toISOString(),
+                  updatedByStudent: "Admin (ผู้ดูแลระบบ)",
+                });
+              }}
+              className="space-y-3.5 text-xs"
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">วันที่สอน</label>
+                  <input
+                    type="date"
+                    value={editingLog.date}
+                    onChange={(e) =>
+                      setEditingLog({ ...editingLog, date: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">คาบเริ่ม</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={7}
+                      value={editingLog.periodStart}
+                      onChange={(e) =>
+                        setEditingLog({
+                          ...editingLog,
+                          periodStart: Number(e.target.value),
+                          periodEnd: Math.max(Number(e.target.value), editingLog.periodEnd),
+                        })
+                      }
+                      className="w-full px-2 py-2 rounded-xl border border-slate-300 text-center font-bold"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">คาบสิ้นสุด</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={7}
+                      value={editingLog.periodEnd}
+                      onChange={(e) =>
+                        setEditingLog({
+                          ...editingLog,
+                          periodEnd: Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-2 py-2 rounded-xl border border-slate-300 text-center font-bold"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">วิชาที่สอน</label>
+                <select
+                  value={editingLog.subjectId}
+                  onChange={(e) => {
+                    const sb = subjects.find((s) => s.id === e.target.value);
+                    setEditingLog({
+                      ...editingLog,
+                      subjectId: e.target.value,
+                      subjectCode: sb?.code || editingLog.subjectCode,
+                      subjectName: sb?.name || editingLog.subjectName,
+                    });
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white"
+                  required
+                >
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.code} {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">ครูผู้สอน</label>
+                <select
+                  value={editingLog.teacherId}
+                  onChange={(e) => {
+                    const tch = teachers.find((t) => t.id === e.target.value);
+                    setEditingLog({
+                      ...editingLog,
+                      teacherId: e.target.value,
+                      teacherName: tch ? `${tch.prefix}${tch.fullName}` : editingLog.teacherName,
+                    });
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white"
+                  required
+                >
+                  {teachers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.prefix}{t.fullName} ({t.department.replace("กลุ่มสาระการเรียนรู้", "สาระฯ ")})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">สถานะการเข้าสอน</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: "on_time", label: "ตรงเวลา" },
+                    { id: "late", label: "สาย >10 นาที" },
+                    { id: "absent", label: "ไม่เข้าสอน" },
+                  ].map((st) => (
+                    <button
+                      type="button"
+                      key={st.id}
+                      onClick={() =>
+                        setEditingLog({
+                          ...editingLog,
+                          status: st.id as any,
+                          absenceReason: st.id === "absent" ? (editingLog.absenceReason || "meeting") : undefined,
+                        })
+                      }
+                      className={`py-2 rounded-xl font-bold border transition-all ${
+                        editingLog.status === st.id
+                          ? "bg-slate-800 text-white border-slate-900 shadow-sm"
+                          : "bg-slate-50 text-slate-600 border-slate-200"
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {editingLog.status === "absent" && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 space-y-2">
+                  <label className="block font-bold text-rose-950">สาเหตุการไม่เข้าสอน</label>
+                  <select
+                    value={editingLog.absenceReason || "other"}
+                    onChange={(e) =>
+                      setEditingLog({
+                        ...editingLog,
+                        absenceReason: e.target.value as any,
+                      })
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg border border-rose-300 bg-white text-xs"
+                  >
+                    <option value="meeting">ประชุม</option>
+                    <option value="activity">เข้าร่วมกิจกรรมสำคัญของโรงเรียน</option>
+                    <option value="official">ไปราชการ</option>
+                    <option value="personal">ลากิจ</option>
+                    <option value="sick">ลาป่วย</option>
+                    <option value="other">เหตุผลอื่นๆ</option>
+                  </select>
+
+                  <input
+                    type="text"
+                    value={editingLog.absenceNote || ""}
+                    onChange={(e) =>
+                      setEditingLog({
+                        ...editingLog,
+                        absenceNote: e.target.value,
+                      })
+                    }
+                    placeholder="พิมพ์ระบุสาเหตุเพิ่มเติม..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-rose-300 bg-white text-xs"
+                  />
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditLogModal(false);
+                    setEditingLog(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md shadow-indigo-600/20"
+                >
+                  บันทึกการแก้ไข
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

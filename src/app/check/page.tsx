@@ -20,6 +20,7 @@ import {
   Bell,
   Edit3,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import {
   getClassrooms,
@@ -30,6 +31,7 @@ import {
   getSubjects,
   addAttendanceLog,
   updateAttendanceLog,
+  deleteAttendanceLog,
   getAttendanceLogs,
   subscribeAttendance,
   getSubstituteAssignments,
@@ -47,6 +49,12 @@ import {
   SubstituteAssignment,
 } from "@/types";
 import { THAI_DAYS } from "@/lib/constants";
+import {
+  getThaiDateString,
+  getThaiOffsetDate,
+  formatThaiDateLong,
+  isWithin7DaysThai,
+} from "@/lib/dateUtils";
 
 // Excluded non-academic activities that should NOT be checked:
 const EXCLUDED_ACTIVITY_KEYWORDS = [
@@ -64,41 +72,6 @@ const EXCLUDED_ACTIVITY_KEYWORDS = [
 function isExcludedActivity(nameOrCode?: string): boolean {
   if (!nameOrCode) return false;
   return EXCLUDED_ACTIVITY_KEYWORDS.some((kw) => nameOrCode.includes(kw));
-}
-
-function formatThaiDateLong(dateStr: string): string {
-  if (!dateStr) return "";
-  const parts = dateStr.split("-").map(Number);
-  if (parts.length < 3 || isNaN(parts[0])) return dateStr;
-  const [y, m, d] = parts;
-  const date = new Date(y, m - 1, d);
-  const thaiDays = [
-    "วันอาทิตย์",
-    "วันจันทร์",
-    "วันอังคาร",
-    "วันพุธ",
-    "วันพฤหัสบดี",
-    "วันศุกร์",
-    "วันเสาร์",
-  ];
-  const thaiMonths = [
-    "มกราคม",
-    "กุมภาพันธ์",
-    "มีนาคม",
-    "เมษายน",
-    "พฤษภาคม",
-    "มิถุนายน",
-    "กรกฎาคม",
-    "สิงหาคม",
-    "กันยายน",
-    "ตุลาคม",
-    "พฤศจิกายน",
-    "ธันวาคม",
-  ];
-  const dayName = thaiDays[date.getDay()] || "";
-  const monthName = thaiMonths[m - 1] || "";
-  const thaiYear = y + 543;
-  return `${dayName}ที่ ${d} ${monthName} ${thaiYear}`;
 }
 
 export default function StudentCheckPage() {
@@ -122,11 +95,9 @@ export default function StudentCheckPage() {
   const [authError, setAuthError] = useState("");
   const [qrScannedRoom, setQrScannedRoom] = useState<string | null>(null);
 
-  // Check-in Form state
-  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
-  const [checkDate, setCheckDate] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
+  // Check-in Form state (in Thai Bangkok Timezone UTC+7)
+  const todayStr = useMemo(() => getThaiDateString(), []);
+  const [checkDate, setCheckDate] = useState(() => getThaiDateString());
   const [isDoublePeriod, setIsDoublePeriod] = useState(false);
   const [periodStart, setPeriodStart] = useState<number>(1);
   const [periodEnd, setPeriodEnd] = useState<number>(1);
@@ -144,18 +115,6 @@ export default function StudentCheckPage() {
   const [allRoomLogs, setAllRoomLogs] = useState<AttendanceRecord[]>([]);
   const [historyTab, setHistoryTab] = useState<"day" | "week">("day");
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
-
-  // Helper: check if a record's date is within 7 days
-  const isWithin7Days = (dateStr: string): boolean => {
-    if (!dateStr) return false;
-    const parts = dateStr.split("-").map(Number);
-    if (parts.length < 3) return false;
-    const recordDate = new Date(parts[0], parts[1] - 1, parts[2]);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const diffDays = Math.floor((today.getTime() - recordDate.getTime()) / (1000 * 60 * 60 * 24));
-    return diffDays >= -1 && diffDays <= 7;
-  };
 
   // Current Thai Time clock
   const [currentTimeStr, setCurrentTimeStr] = useState("");
@@ -205,7 +164,7 @@ export default function StudentCheckPage() {
         if (r) setSelectedGrade(r.grade);
 
         // Check if there are substitute assignments for this room today
-        const todayStr = new Date().toISOString().split("T")[0];
+        const todayStr = getThaiDateString();
         const roomSubs = subList.filter(
           (s) => s.classroomId === savedRoomId && s.date === todayStr
         );
@@ -283,14 +242,14 @@ export default function StudentCheckPage() {
     setRoomTodayLogs(roomLogs.filter((l) => l.date === checkDate));
   }
 
-  // Room logs within 7 days that are eligible for editing
+  // Room logs within 7 days that are eligible for editing/deleting
   const room7DaysLogs = useMemo(() => {
-    return allRoomLogs.filter((l) => isWithin7Days(l.date));
+    return allRoomLogs.filter((l) => isWithin7DaysThai(l.date));
   }, [allRoomLogs]);
 
   // Start editing a record (allowed within 7 days)
   const handleStartEdit = (record: AttendanceRecord) => {
-    if (!isWithin7Days(record.date)) {
+    if (!isWithin7DaysThai(record.date)) {
       alert("รายการนี้ถูกบันทึกเกิน 7 วันแล้ว ไม่สามารถแก้ไขได้ (ตามระเบียบโรงเรียน)");
       return;
     }
@@ -318,6 +277,33 @@ export default function StudentCheckPage() {
     setStatus("");
     setAbsenceReason("");
     setAbsenceNote("");
+  };
+
+  // Delete a record (allowed within 7 days)
+  const handleDeleteRecord = async (record: AttendanceRecord) => {
+    if (!isWithin7DaysThai(record.date)) {
+      alert("รายการนี้ถูกบันทึกเกิน 7 วันแล้ว ไม่สามารถลบได้ (ตามระเบียบโรงเรียน)");
+      return;
+    }
+    const pLabel =
+      record.periodStart === record.periodEnd
+        ? `คาบที่ ${record.periodStart}`
+        : `คาบที่ ${record.periodStart}-${record.periodEnd}`;
+    const confirmed = window.confirm(
+      `คุณต้องการลบข้อมูลการเข้าสอน ${pLabel} (${record.subjectCode} ${record.subjectName}) ของวันที่ ${record.date} ใช่หรือไม่?\n(ข้อมูลจะถูกลบออกจากระบบส่วนกลาง)`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteAttendanceLog(record.id);
+      if (editingRecord?.id === record.id) {
+        handleCancelEdit();
+      }
+      await loadRoomLogs();
+    } catch (e) {
+      console.error(e);
+      alert("เกิดข้อผิดพลาดในการลบข้อมูล กรุณาลองใหม่อีกครั้ง");
+    }
   };
 
   // Handle Room Login
@@ -350,7 +336,7 @@ export default function StudentCheckPage() {
     sessionStorage.setItem("class_check_student", studentName.trim());
 
     // Check if there are substitute assignments for this room today
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = getThaiDateString();
     const roomSubs = substitutes.filter(
       (s) => s.classroomId === selectedRoomId && s.date === todayStr
     );
@@ -549,11 +535,9 @@ export default function StudentCheckPage() {
     }
   };
 
-  // Quick date selector (Today, Yesterday)
+  // Quick date selector (Today, Yesterday) in Thai timezone
   const setQuickDate = (offsetDays: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() - offsetDays);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = getThaiOffsetDate(offsetDays);
     handleDateChange(dateStr);
   };
 
@@ -1806,7 +1790,7 @@ export default function StudentCheckPage() {
               return (
                 <div className="divide-y divide-slate-100">
                   {displayLogs.map((log) => {
-                    const canEdit = isWithin7Days(log.date);
+                    const canEdit = isWithin7DaysThai(log.date);
                     const isCurrentlyEditing = editingRecord?.id === log.id;
                     return (
                       <div
@@ -1865,25 +1849,36 @@ export default function StudentCheckPage() {
                             </span>
                           )}
 
-                          {/* 7-Day Edit Button */}
+                          {/* 7-Day Actions (Edit & Delete) */}
                           {canEdit ? (
-                            <button
-                              type="button"
-                              onClick={() => handleStartEdit(log)}
-                              className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                                isCurrentlyEditing
-                                  ? "bg-amber-600 text-white shadow-xs"
-                                  : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 active:scale-95"
-                              }`}
-                              title="แก้ไขข้อมูลการบันทึก (ภายใน 7 วัน)"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>{isCurrentlyEditing ? "กำลังแก้ไข" : "แก้ไข"}</span>
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEdit(log)}
+                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                                  isCurrentlyEditing
+                                    ? "bg-amber-600 text-white shadow-xs"
+                                    : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 active:scale-95"
+                                }`}
+                                title="แก้ไขข้อมูลการบันทึก (ภายใน 7 วัน)"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>{isCurrentlyEditing ? "กำลังแก้ไข" : "แก้ไข"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRecord(log)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-300 active:scale-95 transition-all shadow-xs"
+                                title="ลบข้อมูลการบันทึกนี้ (ภายใน 7 วัน)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                <span>ลบ</span>
+                              </button>
+                            </div>
                           ) : (
                             <span
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium bg-slate-100 text-slate-400 border border-slate-200"
-                              title="บันทึกเกิน 7 วันแล้ว ไม่สามารถแก้ไขได้"
+                              title="บันทึกเกิน 7 วันแล้ว ไม่สามารถแก้ไขหรือลบได้"
                             >
                               <Lock className="w-3 h-3" />
                               <span>เกิน 7 วัน</span>

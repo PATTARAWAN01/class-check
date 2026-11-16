@@ -27,6 +27,7 @@ import {
 } from "@/types";
 import { saveSubstituteAssignment } from "@/lib/storage";
 import { DEPARTMENTS } from "@/lib/constants";
+import { getThaiDateString } from "@/lib/dateUtils";
 
 export interface OcrParsedItem {
   id: string;
@@ -138,7 +139,7 @@ export default function SubstituteOcrImporter({
 
       setOcrData(data);
       setItems(data.items || []);
-      setTargetDate(data.isoDate || new Date().toISOString().split("T")[0]);
+      setTargetDate(data.isoDate || getThaiDateString());
       setTargetDept(data.department || authDept || "กลุ่มสาระการเรียนรู้");
     } catch (err: any) {
       console.error("OCR upload error:", err);
