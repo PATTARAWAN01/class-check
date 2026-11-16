@@ -738,9 +738,6 @@ export default function AdminPage() {
           <h2 className="text-xl font-bold text-slate-800">
             เข้าสู่ระบบผู้ดูแลระบบ (Admin)
           </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            สำหรับฝ่ายวิชาการและผู้ดูแลระบบโรงเรียน
-          </p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
@@ -898,9 +895,6 @@ export default function AdminPage() {
               <h2 className="text-base font-bold text-slate-800">
                 ระบบส่งออกรายงานทางการ (Official PDF & Excel)
               </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                สร้างเอกสารรายงานทางการของโรงเรียน พร้อมตราสัญลักษณ์ สรุปสถิติ และช่องลงนามฝ่ายวิชาการ/ผู้อำนวยการ
-              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -1060,9 +1054,6 @@ export default function AdminPage() {
                     ระบบจัดสอนแทน &amp; นำเข้ารายงาน PDF OCR
                   </h2>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  นำเข้าไฟล์ PDF รายงานการจัดสอนแทนประจำวันผ่านระบบ AI OCR อัตโนมัติ หรือตรวจสอบสถิติและประวัติการสอนแทนย้อนหลัง
-                </p>
               </div>
 
               {/* Sub-tab switcher */}
@@ -1374,9 +1365,6 @@ export default function AdminPage() {
                 <h2 className="text-base font-bold text-slate-800">
                   จัดการตารางสอนประจำภาคเรียน (Timetable)
                 </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  เมื่อขึ้นเทอมใหม่ เพียงดาวน์โหลดเทมเพลตมาตรฐานไปกรอก แล้วอัปโหลดไฟล์เดียวเข้าระบบได้ทันที
-                </p>
               </div>
 
               {/* Excel Import & Template Buttons */}
@@ -1497,9 +1485,6 @@ export default function AdminPage() {
                     {teachers.length} ท่าน
                   </span>
                 </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  เรียงลำดับรหัสตาม 8 กลุ่มสาระการเรียนรู้ สามารถเพิ่ม ลบ หรือแก้ไขข้อมูลครูรายบุคคลได้
-                </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
@@ -1838,9 +1823,6 @@ export default function AdminPage() {
                     {subjects.length} วิชา
                   </span>
                 </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  สามารถเพิ่ม แก้ไข ลบวิชา และกำหนดห้องเรียนที่เรียนวิชานั้น เพื่อแสดงเฉพาะในหน้าบันทึกของนักเรียนห้องนั้นๆ
-                </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
@@ -2334,9 +2316,6 @@ export default function AdminPage() {
                 <h2 className="text-base font-bold text-slate-800">
                   จัดการห้องเรียนและรหัส PIN ประจำห้อง
                 </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  กำหนดรหัสผ่าน PIN ให้หัวหน้าห้องแต่ละห้องนำไปใช้ล็อกอินเข้าเช็คชื่อ เพื่อป้องกันการเช็คชื่อข้ามห้อง
-                </p>
               </div>
               <button
                 type="button"
@@ -2506,9 +2485,6 @@ export default function AdminPage() {
               <h2 className="text-base font-bold text-slate-800">
                 จัดการภาคเรียนและปีการศึกษา (Academic Terms)
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                ข้อมูลการเช็คชื่อทั้งหมดจะถูกจัดเก็บแยกตามภาคเรียน เพื่อให้สามารถดูสถิติย้อนหลังได้ทุกปีการศึกษา
-              </p>
             </div>
 
             {/* Add Term Form */}
@@ -2578,9 +2554,6 @@ export default function AdminPage() {
               <h2 className="text-base font-bold text-slate-800">
                 กำหนดตารางเวลาของแต่ละคาบเรียน (Period Schedule)
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                เวลาเหล่านี้จะถูกนำไปใช้ตรวจจับคาบเรียนปัจจุบันและดึงวิชาขึ้นมาให้อัตโนมัติ (Auto-suggest)
-              </p>
             </div>
 
             <form onSubmit={handleSavePeriods}>
@@ -2625,9 +2598,6 @@ export default function AdminPage() {
               <h2 className="text-base font-bold text-slate-800">
                 ข้อมูลสถานศึกษาและผู้ลงนามในรายงานทางการ (PDF)
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                แอดมินสามารถกำหนดได้ว่าต้องการให้มีผู้ลงนามกี่คน เป็นใคร และตำแหน่งอะไร โดยระบบจะจดจำและนำไปสร้างช่องลงนามในเอกสาร PDF อัตโนมัติ
-              </p>
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-6 max-w-2xl">

@@ -314,16 +314,9 @@ export default function StatisticsPage() {
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
           <div>
-            <div className="flex items-center gap-2 text-sky-400 text-xs font-semibold uppercase tracking-wider mb-2">
-              <TrendingUp className="w-4 h-4" />
-              <span>สรุปผลข้อมูลสาธารณะ &bull; อัปเดตสดแบบเรียลไทม์</span>
-            </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
               สถิติการเข้าสอนของครูผู้สอน
             </h1>
-            <p className="text-slate-300 text-sm mt-1 max-w-2xl">
-              รายงานและสถิติการปฏิบัติการสอนของคณะครู {schoolProfile?.schoolName} เพื่อส่งเสริมความโปร่งใสและยกระดับมาตรฐานการศึกษา
-            </p>
           </div>
 
           {/* Term Selector & Quick Export */}
@@ -520,7 +513,7 @@ export default function StatisticsPage() {
           <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500">
             <span>ประชุม: {kpis.absentMeeting}</span>
             <span>&bull;</span>
-            <span>ร่วมกิจกรรม: {kpis.absentActivity}</span>
+            <span>กิจกรรมสำคัญ: {kpis.absentActivity}</span>
             <span>&bull;</span>
             <span>อื่นๆ: {kpis.absentOther}</span>
           </div>
@@ -561,17 +554,12 @@ export default function StatisticsPage() {
 
       {/* TEACHERS STATISTICS TABLE */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h2 className="font-bold text-slate-800 text-base">
-              ตารางสรุปการเข้าสอนรายบุคคล
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              แสดงสถิติจำนวนคาบและอัตราการเข้าสอนของครูแต่ละท่าน สามารถกดคลิกเพื่อดูประวัติเจาะลึกได้
-            </p>
-          </div>
-          <span className="text-xs text-slate-400 font-medium">
-            ทั้งหมด {teacherStats.length} ท่าน
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
+          <h2 className="font-bold text-slate-800 text-base">
+            ตารางสรุปการเข้าสอนรายบุคคล
+          </h2>
+          <span className="text-xs text-slate-500 font-semibold">
+            ครู {teacherStats.length} ท่าน
           </span>
         </div>
 
@@ -1128,7 +1116,7 @@ export default function StatisticsPage() {
                               {r.absenceReason === "meeting"
                                 ? "ประชุม"
                                 : r.absenceReason === "activity"
-                                ? "ร่วมกิจกรรมสำคัญ"
+                                ? "เข้าร่วมกิจกรรมสำคัญของโรงเรียน"
                                 : r.absenceReason === "official"
                                 ? "ไปราชการ"
                                 : r.absenceReason === "sick"

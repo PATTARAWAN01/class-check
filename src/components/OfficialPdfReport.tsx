@@ -307,7 +307,7 @@ export default function OfficialPdfReport({
             {absentPeriods > 0 && (
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-slate-600 font-medium">
                 <span>&bull; ประชุม: <strong className="text-slate-900">{absentMeeting}</strong></span>
-                <span>&bull; ร่วมกิจกรรม: <strong className="text-slate-900">{absentActivity}</strong></span>
+                <span>&bull; กิจกรรมสำคัญ: <strong className="text-slate-900">{absentActivity}</strong></span>
                 <span>&bull; อื่นๆ: <strong className="text-slate-900">{absentOther}</strong></span>
               </div>
             )}
@@ -342,7 +342,7 @@ export default function OfficialPdfReport({
                   <th className="border border-slate-300 p-1.5 w-12 text-center whitespace-nowrap text-amber-800">สาย</th>
                   <th className="border border-slate-300 p-1.5 w-16 text-center whitespace-nowrap text-rose-800 font-bold">ไม่เข้าสอน</th>
                   <th className="border border-slate-300 p-1.5 w-14 text-center whitespace-nowrap text-slate-700">ประชุม</th>
-                  <th className="border border-slate-300 p-1.5 w-16 text-center whitespace-nowrap text-slate-700">ร่วมกิจกรรม</th>
+                  <th className="border border-slate-300 p-1.5 w-16 text-center whitespace-nowrap text-slate-700">กิจกรรมสำคัญ</th>
                   <th className="border border-slate-300 p-1.5 text-left whitespace-nowrap min-w-[150px] text-slate-700">อื่นๆ / ระบุเหตุผล</th>
                   <th className="border border-slate-300 p-1.5 w-20 text-center whitespace-nowrap font-bold text-slate-900">ร้อยละเข้าสอน</th>
                 </tr>
@@ -498,7 +498,7 @@ export default function OfficialPdfReport({
                                 : r.absenceReason === "meeting"
                                 ? "ประชุม"
                                 : r.absenceReason === "activity"
-                                ? "ร่วมกิจกรรมสำคัญ"
+                                ? "เข้าร่วมกิจกรรมสำคัญของโรงเรียน"
                                 : "อื่นๆ"
                             } ${r.absenceNote ? `(${r.absenceNote})` : ""}`
                           : r.isSubstitute

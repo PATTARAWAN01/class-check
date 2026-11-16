@@ -48,7 +48,7 @@ export const ABSENCE_REASON_LABELS: Record<string, string> = {
   personal: "ลากิจ",
   official: "ไปราชการ",
   meeting: "ประชุม",
-  activity: "ร่วมกิจกรรมสำคัญ",
+  activity: "เข้าร่วมกิจกรรมสำคัญของโรงเรียน",
   other: "เหตุผลอื่นๆ",
 };
 

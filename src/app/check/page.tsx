@@ -810,16 +810,9 @@ export default function StudentCheckPage() {
       {/* Page Header */}
       <div className="bg-gradient-to-r from-sky-700 via-sky-800 to-indigo-900 rounded-2xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-sky-200 text-xs font-semibold tracking-wider uppercase mb-1">
-            <UserCheck className="w-4 h-4" />
-            <span>ระบบบันทึกเวลาเรียนสำหรับนักเรียน / หัวหน้าห้อง</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             เช็คเวลาเข้าสอนของครู
           </h1>
-          <p className="text-sky-100 text-sm mt-1">
-            ร่วมกันสร้างวินัยและส่งเสริมคุณภาพการจัดการเรียนรู้ในห้องเรียน
-          </p>
         </div>
 
         {/* Live Clock Card */}
@@ -842,9 +835,6 @@ export default function StudentCheckPage() {
             <h2 className="text-xl font-bold text-slate-800">
               เข้าสู่ระบบประจำห้องเรียน
             </h2>
-            <p className="text-sm text-slate-500 mt-1">
-              กรุณาเลือกห้องเรียนและใส่รหัส PIN เพื่อป้องกันการเช็คชื่อข้ามห้อง
-            </p>
           </div>
 
           <form onSubmit={handleRoomLogin} className="space-y-4">
@@ -874,8 +864,13 @@ export default function StudentCheckPage() {
             {/* Split Grade and Room Selectors */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  1. เลือกระดับชั้น <span className="text-rose-500">*</span>
+                <label className="flex items-center justify-between text-sm font-semibold text-slate-700 mb-1.5">
+                  <span>1. เลือกระดับชั้น <span className="text-rose-500">*</span></span>
+                  {selectedGrade && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      ✓ ตอบแล้ว
+                    </span>
+                  )}
                 </label>
                 <select
                   value={selectedGrade}
@@ -883,7 +878,11 @@ export default function StudentCheckPage() {
                     setSelectedGrade(e.target.value);
                     setSelectedRoomId("");
                   }}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm bg-white font-medium"
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all ${
+                    selectedGrade
+                      ? "border-2 border-emerald-600 bg-emerald-50/50 text-emerald-950 font-bold shadow-xs"
+                      : "border-slate-300 bg-white text-slate-700 focus:ring-2 focus:ring-sky-500"
+                  }`}
                   required
                 >
                   <option value="">-- เลือกระดับชั้น --</option>
@@ -896,14 +895,23 @@ export default function StudentCheckPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  2. เลือกห้องเรียน <span className="text-rose-500">*</span>
+                <label className="flex items-center justify-between text-sm font-semibold text-slate-700 mb-1.5">
+                  <span>2. เลือกห้องเรียน <span className="text-rose-500">*</span></span>
+                  {selectedRoomId && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      ✓ ตอบแล้ว
+                    </span>
+                  )}
                 </label>
                 <select
                   value={selectedRoomId}
                   onChange={(e) => setSelectedRoomId(e.target.value)}
                   disabled={!selectedGrade}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm bg-white font-medium disabled:bg-slate-100 disabled:text-slate-400"
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all ${
+                    selectedRoomId
+                      ? "border-2 border-emerald-600 bg-emerald-50/50 text-emerald-950 font-bold shadow-xs"
+                      : "border-slate-300 bg-white text-slate-700 disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                  }`}
                   required
                 >
                   <option value="">
@@ -923,8 +931,13 @@ export default function StudentCheckPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                รหัส PIN ประจำห้อง (4-6 หลัก) <span className="text-rose-500">*</span>
+              <label className="flex items-center justify-between text-sm font-semibold text-slate-700 mb-1.5">
+                <span>รหัส PIN ประจำห้อง (4-6 หลัก) <span className="text-rose-500">*</span></span>
+                {pinInput.length >= 4 && (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    ✓ กรอกแล้ว
+                  </span>
+                )}
               </label>
               <input
                 type="password"
@@ -934,22 +947,34 @@ export default function StudentCheckPage() {
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
                 placeholder="••••"
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-lg tracking-widest text-center font-mono font-bold"
+                className={`w-full px-4 py-3 rounded-xl border text-lg tracking-widest text-center font-mono font-bold transition-all ${
+                  pinInput.length >= 4
+                    ? "border-2 border-emerald-600 bg-emerald-50/50 text-emerald-950 shadow-xs"
+                    : "border-slate-300 bg-white text-slate-700 focus:ring-2 focus:ring-sky-500"
+                }`}
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                ชื่อ-นามสกุล หรือ เลขที่ของนักเรียนผู้บันทึก{" "}
-                <span className="text-rose-500">*</span>
+              <label className="flex items-center justify-between text-sm font-semibold text-slate-700 mb-1.5">
+                <span>ชื่อ-นามสกุล หรือ เลขที่ของนักเรียนผู้บันทึก <span className="text-rose-500">*</span></span>
+                {studentName.trim().length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    ✓ ระบุแล้ว
+                  </span>
+                )}
               </label>
               <input
                 type="text"
                 value={studentName}
                 onChange={(e) => setStudentName(e.target.value)}
                 placeholder="เช่น ด.ช.ธนกฤต เลขที่ 1 (หัวหน้าห้อง)"
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm"
+                className={`w-full px-4 py-2.5 rounded-xl border text-sm transition-all ${
+                  studentName.trim().length > 0
+                    ? "border-2 border-emerald-600 bg-emerald-50/50 text-emerald-950 font-bold shadow-xs"
+                    : "border-slate-300 bg-white text-slate-700 focus:ring-2 focus:ring-sky-500"
+                }`}
                 required
               />
             </div>
@@ -1044,16 +1069,16 @@ export default function StudentCheckPage() {
             <div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 mb-4 gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center">
-                    1
+                  <span className="w-7 h-7 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                    ✓ 1
                   </span>
-                  <div>
+                  <div className="flex items-center gap-2">
                     <h3 className="font-bold text-slate-800 text-base">
                       เลือกวันที่และคาบเรียน
                     </h3>
-                    <p className="text-xs text-slate-500">
-                      คลิกเลือกคาบเพื่อดึงวิชาและครูอัตโนมัติ (หรือเลือกวันที่เพื่อบันทึกย้อนหลัง)
-                    </p>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      ✓ ตอบแล้ว: คาบ {isDoublePeriod ? `${periodStart}-${periodEnd}` : periodStart}
+                    </span>
                   </div>
                 </div>
 
@@ -1097,17 +1122,17 @@ export default function StudentCheckPage() {
                   </span>
                   {checkDate < todayStr && (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                      🕒 กำลังบันทึกย้อนหลัง
+                      🕒 บันทึกย้อนหลัง
                     </span>
                   )}
                   {checkDate > todayStr && (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-200">
-                      ℹ️ กำลังบันทึกล่วงหน้า
+                      ℹ️ บันทึกล่วงหน้า
                     </span>
                   )}
                   {checkDate === todayStr && (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                      ✓ วันที่ปัจจุบัน
+                      ✓ วันนี้
                     </span>
                   )}
                 </div>
@@ -1138,11 +1163,6 @@ export default function StudentCheckPage() {
                   <span className="text-sm font-semibold text-slate-800">
                     เป็นวิชาคาบคู่ (2 คาบติดกัน)
                   </span>
-                  <span className="block text-xs text-slate-500">
-                    {isDoublePeriod
-                      ? "ระบบจะคำนวณภาระงานเป็น 2 คาบโดยอัตโนมัติ"
-                      : "เป็นวิชาคาบเดี่ยว (1 คาบ)"}
-                  </span>
                 </div>
               </div>
 
@@ -1166,11 +1186,18 @@ export default function StudentCheckPage() {
                           onClick={() => handlePeriodStartChange(p.periodNumber)}
                           className={`p-2.5 rounded-xl border text-center transition-all relative ${
                             isSelected
-                              ? "bg-sky-600 text-white border-sky-600 shadow-md shadow-sky-600/25 ring-2 ring-sky-300"
+                              ? "bg-sky-800 text-white border-2 border-sky-950 shadow-md ring-4 ring-sky-300 scale-[1.02]"
                               : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
                           }`}
                         >
-                          <div className="text-xs font-bold">คาบที่ {p.periodNumber}</div>
+                          <div className="text-xs font-bold flex items-center justify-center gap-1">
+                            <span>คาบที่ {p.periodNumber}</span>
+                            {isSelected && (
+                              <span className="text-[10px] bg-sky-600 px-1 rounded text-white font-bold">
+                                ✓
+                              </span>
+                            )}
+                          </div>
                           <div className={`text-[10px] mt-0.5 ${isSelected ? "text-sky-100" : "text-slate-500 font-mono"}`}>
                             {p.startTime} - {p.endTime}
                           </div>
@@ -1178,7 +1205,7 @@ export default function StudentCheckPage() {
                             <div className="mt-1">
                               <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
                                 isSelected
-                                  ? "bg-white text-sky-800"
+                                  ? "bg-white text-sky-900"
                                   : "bg-emerald-100 text-emerald-800 border border-emerald-200"
                               }`}>
                                 ✓ บันทึกแล้ว
@@ -1220,11 +1247,18 @@ export default function StudentCheckPage() {
                           onClick={() => handlePeriodStartChange(p.periodNumber)}
                           className={`p-2.5 rounded-xl border text-center transition-all relative ${
                             isSelected
-                              ? "bg-sky-600 text-white border-sky-600 shadow-md shadow-sky-600/25 ring-2 ring-sky-300"
+                              ? "bg-sky-800 text-white border-2 border-sky-950 shadow-md ring-4 ring-sky-300 scale-[1.02]"
                               : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
                           }`}
                         >
-                          <div className="text-xs font-bold">คาบที่ {p.periodNumber}</div>
+                          <div className="text-xs font-bold flex items-center justify-center gap-1">
+                            <span>คาบที่ {p.periodNumber}</span>
+                            {isSelected && (
+                              <span className="text-[10px] bg-sky-600 px-1 rounded text-white font-bold">
+                                ✓
+                              </span>
+                            )}
+                          </div>
                           <div className={`text-[10px] mt-0.5 ${isSelected ? "text-sky-100" : "text-slate-500 font-mono"}`}>
                             {p.startTime} - {p.endTime}
                           </div>
@@ -1232,7 +1266,7 @@ export default function StudentCheckPage() {
                             <div className="mt-1">
                               <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
                                 isSelected
-                                  ? "bg-white text-sky-800"
+                                  ? "bg-white text-sky-900"
                                   : "bg-emerald-100 text-emerald-800 border border-emerald-200"
                               }`}>
                                 ✓ บันทึกแล้ว
@@ -1261,16 +1295,29 @@ export default function StudentCheckPage() {
             <div className="border-t border-slate-100 pt-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 mb-4 gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center">
-                    2
+                  <span
+                    className={`w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center shadow-xs transition-colors ${
+                      selectedSubjectId && selectedTeacherId
+                        ? "bg-emerald-600 text-white"
+                        : "bg-sky-100 text-sky-700"
+                    }`}
+                  >
+                    {selectedSubjectId && selectedTeacherId ? "✓ 2" : "2"}
                   </span>
-                  <h3 className="font-bold text-slate-800 text-base">
-                    วิชาและครูผู้สอน
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-slate-800 text-base">
+                      วิชาและครูผู้สอน
+                    </h3>
+                    {selectedSubjectId && selectedTeacherId && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        ✓ ตอบแล้ว
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                  วิชาเรียนประจำห้อง {currentRoom?.gradeRoom} ({roomSubjects.length} วิชา)
+                  ห้อง {currentRoom?.gradeRoom} ({roomSubjects.length} วิชา)
                 </span>
               </div>
 
@@ -1278,12 +1325,12 @@ export default function StudentCheckPage() {
                 {/* 1. Subject Selector (Room only) */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                       1. เลือกวิชาที่สอน <span className="text-rose-500">*</span>
                     </label>
                     {selectedSubject && (
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-200">
-                        {selectedSubject.department.replace("กลุ่มสาระการเรียนรู้", "")}
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        ✓ ตอบแล้ว: {selectedSubject.code}
                       </span>
                     )}
                   </div>
@@ -1291,7 +1338,11 @@ export default function StudentCheckPage() {
                   <select
                     value={selectedSubjectId}
                     onChange={(e) => handleSubjectChange(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm bg-white font-medium"
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-sm transition-all ${
+                      selectedSubjectId
+                        ? "border-2 border-emerald-600 bg-emerald-50/60 text-emerald-950 font-bold shadow-xs"
+                        : "border-slate-300 bg-white font-medium focus:ring-2 focus:ring-sky-500"
+                    }`}
                     required
                   >
                     <option value="">-- เลือกรหัสและชื่อรายวิชา ({roomSubjects.length} วิชา) --</option>
@@ -1301,40 +1352,32 @@ export default function StudentCheckPage() {
                       </option>
                     ))}
                   </select>
-
-                  <p className="text-[11px] text-slate-500 mt-1.5">
-                    {selectedSubject ? (
-                      <span className="text-slate-600">
-                        วิชา <strong>{selectedSubject.name}</strong> ({selectedSubject.code}) สังกัด: {selectedSubject.department}
-                      </span>
-                    ) : (
-                      <span className="text-slate-500">
-                        💡 แสดงเฉพาะรายวิชาที่ห้อง {currentRoom?.gradeRoom} เรียนในภาคเรียนนี้
-                      </span>
-                    )}
-                  </p>
                 </div>
 
                 {/* 2. Teacher Selector (Cascading from Subject) */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                       2. เลือกชื่อครูผู้สอน <span className="text-rose-500">*</span>
                     </label>
 
-                    {selectedSubject && (
+                    {selectedTeacherId ? (
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        ✓ ตอบแล้ว
+                      </span>
+                    ) : selectedSubject ? (
                       <span
                         className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
                           isGuidanceOrAntiCorruption
                             ? "bg-purple-50 text-purple-800 border-purple-200"
-                            : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                            : "bg-slate-100 text-slate-700 border-slate-200"
                         }`}
                       >
                         {isGuidanceOrAntiCorruption
                           ? `ครูทั้งโรงเรียน (${filteredTeachers.length} ท่าน)`
-                          : `เฉพาะครูในกลุ่มสาระ (${filteredTeachers.length} ท่าน)`}
+                          : `ครูในกลุ่มสาระ (${filteredTeachers.length} ท่าน)`}
                       </span>
-                    )}
+                    ) : null}
                   </div>
 
                   {currentSubstitute && (
@@ -1363,7 +1406,11 @@ export default function StudentCheckPage() {
                     value={selectedTeacherId}
                     onChange={(e) => setSelectedTeacherId(e.target.value)}
                     disabled={!selectedSubjectId}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-sm bg-white font-medium disabled:bg-slate-100 disabled:text-slate-400"
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-sm transition-all ${
+                      selectedTeacherId
+                        ? "border-2 border-emerald-600 bg-emerald-50/60 text-emerald-950 font-bold shadow-xs"
+                        : "border-slate-300 bg-white font-medium disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-sky-500"
+                    }`}
                     required
                   >
                     <option value="">
@@ -1436,22 +1483,6 @@ export default function StudentCheckPage() {
                           );
                         })}
                   </select>
-
-                  <div className="text-[11px] mt-1.5">
-                    {!selectedSubjectId ? (
-                      <span className="text-amber-600 font-medium">
-                        ⚠️ กรุณาเลือกวิชาก่อน ระบบจะแสดงเฉพาะครูที่สังกัดกลุ่มสาระของวิชานั้น
-                      </span>
-                    ) : isGuidanceOrAntiCorruption ? (
-                      <span className="text-purple-700 font-medium">
-                        🌟 วิชาแนะแนว / ต้านทุจริต: แสดงรายชื่อครูผู้สอนทุกกลุ่มสาระการเรียนรู้ทั้งโรงเรียน
-                      </span>
-                    ) : (
-                      <span className="text-slate-600">
-                        แสดงเฉพาะครูสังกัด{selectedSubject?.department} เพื่อความถูกต้องและเลือกได้รวดเร็ว
-                      </span>
-                    )}
-                  </div>
                 </div>
               </div>
             </div>
@@ -1459,21 +1490,36 @@ export default function StudentCheckPage() {
             {/* Section 3: Attendance Status Recording */}
             <div className="border-t border-slate-100 pt-6">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-3 mb-4">
-                <span className="w-6 h-6 rounded-full bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center">
-                  3
+                <span
+                  className={`w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center shadow-xs transition-colors ${
+                    status && (status !== "absent" || (absenceReason && (absenceReason !== "other" || absenceNote.trim())))
+                      ? "bg-emerald-600 text-white"
+                      : "bg-sky-100 text-sky-700"
+                  }`}
+                >
+                  {status && (status !== "absent" || (absenceReason && (absenceReason !== "other" || absenceNote.trim()))) ? "✓ 3" : "3"}
                 </span>
-                <h3 className="font-bold text-slate-800 text-base">
-                  บันทึกสถานะการเข้าสอน <span className="text-rose-500">*</span>
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-800 text-base">
+                    บันทึกสถานะการเข้าสอน <span className="text-rose-500">*</span>
+                  </h3>
+                  {status && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      ✓ ตอบแล้ว
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Status Radio Buttons */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* 1. On-time */}
                 <label
-                  className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                  className={`relative flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${
                     status === "on_time"
-                      ? "border-emerald-500 bg-emerald-50/70 shadow-sm"
+                      ? "border-emerald-600 bg-emerald-100 text-emerald-950 shadow-md ring-4 ring-emerald-300/60 scale-[1.02]"
+                      : status !== ""
+                      ? "border-dashed border-slate-200 bg-slate-50/70 text-slate-400 opacity-40 hover:opacity-75"
                       : "border-slate-200 hover:border-slate-300 bg-white"
                   }`}
                 >
@@ -1489,26 +1535,30 @@ export default function StudentCheckPage() {
                     }}
                     className="sr-only"
                   />
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-emerald-800 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-base">
                       เข้าสอนตรงเวลา
                     </span>
-                    <CheckCircle2
-                      className={`w-5 h-5 ${
-                        status === "on_time" ? "text-emerald-600" : "text-slate-300"
-                      }`}
-                    />
+                    {status === "on_time" && (
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-700 text-white text-[11px] font-bold">
+                        ✓ ตอบข้อนี้แล้ว
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-500">
-                    ครูเข้าสอนภายใน 10 นาทีแรกหลังเสียงสัญญาณเริ่มคาบ
-                  </p>
+                  <CheckCircle2
+                    className={`w-6 h-6 shrink-0 ${
+                      status === "on_time" ? "text-emerald-700" : "text-slate-300"
+                    }`}
+                  />
                 </label>
 
                 {/* 2. Late */}
                 <label
-                  className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                  className={`relative flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${
                     status === "late"
-                      ? "border-amber-500 bg-amber-50/70 shadow-sm"
+                      ? "border-amber-600 bg-amber-100 text-amber-950 shadow-md ring-4 ring-amber-300/60 scale-[1.02]"
+                      : status !== ""
+                      ? "border-dashed border-slate-200 bg-slate-50/70 text-slate-400 opacity-40 hover:opacity-75"
                       : "border-slate-200 hover:border-slate-300 bg-white"
                   }`}
                 >
@@ -1524,26 +1574,30 @@ export default function StudentCheckPage() {
                     }}
                     className="sr-only"
                   />
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-amber-800 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-base">
                       เข้าสอนหลัง 10 นาที
                     </span>
-                    <AlertTriangle
-                      className={`w-5 h-5 ${
-                        status === "late" ? "text-amber-500" : "text-slate-300"
-                      }`}
-                    />
+                    {status === "late" && (
+                      <span className="px-2 py-0.5 rounded-md bg-amber-700 text-white text-[11px] font-bold">
+                        ✓ ตอบข้อนี้แล้ว
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-500">
-                    ครูเข้าสอนช้ากว่า 10 นาที (มาสอนแต่สาย)
-                  </p>
+                  <AlertTriangle
+                    className={`w-6 h-6 shrink-0 ${
+                      status === "late" ? "text-amber-700" : "text-slate-300"
+                    }`}
+                  />
                 </label>
 
                 {/* 3. Absent */}
                 <label
-                  className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                  className={`relative flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all ${
                     status === "absent"
-                      ? "border-rose-500 bg-rose-50/70 shadow-sm"
+                      ? "border-rose-600 bg-rose-100 text-rose-950 shadow-md ring-4 ring-rose-300/60 scale-[1.02]"
+                      : status !== ""
+                      ? "border-dashed border-slate-200 bg-slate-50/70 text-slate-400 opacity-40 hover:opacity-75"
                       : "border-slate-200 hover:border-slate-300 bg-white"
                   }`}
                 >
@@ -1555,68 +1609,94 @@ export default function StudentCheckPage() {
                     onChange={() => setStatus("absent")}
                     className="sr-only"
                   />
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-rose-800 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-base">
                       ไม่เข้าสอน
                     </span>
-                    <XCircle
-                      className={`w-5 h-5 ${
-                        status === "absent" ? "text-rose-600" : "text-slate-300"
-                      }`}
-                    />
+                    {status === "absent" && (
+                      <span className="px-2 py-0.5 rounded-md bg-rose-700 text-white text-[11px] font-bold">
+                        ✓ ตอบข้อนี้แล้ว
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-500">
-                    ครูไม่มาสอนในคาบนี้ (ต้องระบุสาเหตุ)
-                  </p>
+                  <XCircle
+                    className={`w-6 h-6 shrink-0 ${
+                      status === "absent" ? "text-rose-700" : "text-slate-300"
+                    }`}
+                  />
                 </label>
               </div>
 
               {/* Sub-form: Absence Reason */}
               {status === "absent" && (
-                <div className="mt-4 p-4 rounded-xl bg-rose-50/60 border border-rose-200 space-y-3 animate-in fade-in duration-200">
-                  <label className="block text-xs font-bold text-rose-900 uppercase tracking-wider">
-                    ระบุสาเหตุที่ครูไม่เข้าสอน <span className="text-rose-600">*</span>
-                  </label>
+                <div className="mt-4 p-4 rounded-xl bg-rose-50/70 border-2 border-rose-300 space-y-3 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-rose-950 uppercase tracking-wider">
+                      ระบุสาเหตุที่ครูไม่เข้าสอน <span className="text-rose-600">*</span>
+                    </label>
+                    {absenceReason && (
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-200 text-rose-900 border border-rose-300">
+                        ✓ ตอบแล้ว
+                      </span>
+                    )}
+                  </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {[
                       { id: "meeting", label: "ประชุม" },
                       {
                         id: "activity",
-                        label: "ร่วมกิจกรรมสำคัญ (ศึกษาดูงาน/ตรวจเยี่ยม)",
+                        label: "เข้าร่วมกิจกรรมสำคัญของโรงเรียน",
                       },
-                      { id: "other", label: "เหตุผลอื่นๆ (พิมพ์ตอบเอง)" },
-                    ].map((reason) => (
-                      <label
-                        key={reason.id}
-                        className={`flex items-center justify-center gap-1.5 p-2.5 rounded-lg border text-xs font-semibold cursor-pointer transition-all ${
-                          absenceReason === reason.id
-                            ? "bg-rose-600 text-white border-rose-600 shadow-sm"
-                            : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/50"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="absence_reason"
-                          value={reason.id}
-                          checked={absenceReason === reason.id}
-                          onChange={() => setAbsenceReason(reason.id as AbsenceReason)}
-                          className="sr-only"
-                        />
-                        <span>{reason.label}</span>
-                      </label>
-                    ))}
+                      { id: "other", label: "เหตุผลอื่นๆ" },
+                    ].map((reason) => {
+                      const isChosen = absenceReason === reason.id;
+                      return (
+                        <label
+                          key={reason.id}
+                          className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                            isChosen
+                              ? "bg-rose-700 text-white border-2 border-rose-800 shadow-md ring-2 ring-rose-400 font-bold scale-[1.02]"
+                              : absenceReason !== ""
+                              ? "bg-white/60 text-slate-500 border-rose-200 opacity-60 hover:opacity-90"
+                              : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/50 font-medium"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="absence_reason"
+                            value={reason.id}
+                            checked={isChosen}
+                            onChange={() => setAbsenceReason(reason.id as AbsenceReason)}
+                            className="sr-only"
+                          />
+                          <span>{isChosen ? `✓ ${reason.label}` : reason.label}</span>
+                        </label>
+                      );
+                    })}
                   </div>
 
                   {/* Other Note Input */}
                   {absenceReason === "other" && (
-                    <div className="mt-2">
+                    <div className="mt-2 space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-rose-900">พิมพ์ระบุสาเหตุอื่นๆ:</span>
+                        {absenceNote.trim() && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-200 text-rose-900">
+                            ✓ ระบุแล้ว
+                          </span>
+                        )}
+                      </div>
                       <input
                         type="text"
                         value={absenceNote}
                         onChange={(e) => setAbsenceNote(e.target.value)}
-                        placeholder="กรุณาพิมพ์ระบุสาเหตุเพิ่มเติมที่นี่..."
-                        className="w-full px-3.5 py-2 rounded-lg border border-rose-300 focus:ring-2 focus:ring-rose-500 text-xs bg-white text-slate-800"
+                        placeholder="พิมพ์ระบุสาเหตุเพิ่มเติมที่นี่..."
+                        className={`w-full px-3.5 py-2.5 rounded-xl border text-xs text-slate-800 transition-all ${
+                          absenceNote.trim()
+                            ? "border-2 border-rose-600 bg-white font-bold"
+                            : "border-rose-300 bg-white focus:ring-2 focus:ring-rose-500"
+                        }`}
                         required
                       />
                     </div>
@@ -1626,15 +1706,11 @@ export default function StudentCheckPage() {
             </div>
 
             {/* Submit Button */}
-            <div className="border-t border-slate-100 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="text-xs text-slate-400">
-                * ต้องเลือกและกรอกข้อมูลให้ครบถ้วนทุกข้อ จึงจะสามารถกดบันทึกได้
-              </div>
-
+            <div className="border-t border-slate-100 pt-6 flex justify-end">
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 active:scale-95 text-white font-semibold rounded-xl shadow-lg shadow-sky-600/25 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+                className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-sky-600/25 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
               >
                 <Send className="w-4 h-4" />
                 <span>{submitting ? "กำลังบันทึก..." : "ยืนยันบันทึกการเข้าสอน"}</span>
@@ -1699,7 +1775,7 @@ export default function StudentCheckPage() {
                       {log.status === "absent" && (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">
                           <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                          ไม่เข้าสอน ({log.absenceReason === "official" ? "ไปราชการ" : log.absenceReason === "personal" ? "ลากิจ" : log.absenceReason === "sick" ? "ลาป่วย" : log.absenceNote || "อื่นๆ"})
+                          ไม่เข้าสอน ({log.absenceReason === "meeting" ? "ประชุม" : log.absenceReason === "activity" ? "กิจกรรมสำคัญ" : log.absenceReason === "official" ? "ไปราชการ" : log.absenceReason === "personal" ? "ลากิจ" : log.absenceReason === "sick" ? "ลาป่วย" : log.absenceNote || "เหตุผลอื่นๆ"})
                         </span>
                       )}
                     </div>
