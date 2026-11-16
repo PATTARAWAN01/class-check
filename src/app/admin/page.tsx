@@ -305,19 +305,16 @@ export default function AdminPage() {
     setTimeout(() => setNotice(null), 4000);
   };
 
-  // Login Handler (Default admin / admin123)
+  // Login Handler (Admin Authentication)
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError("");
 
-    if (
-      (adminUsername === "admin" && adminPassword === "admin123") ||
-      (adminUsername === "admin" && adminPassword === "1234")
-    ) {
+    if (adminUsername === "admin" && adminPassword === "nwsp123456") {
       setIsAuthenticated(true);
       sessionStorage.setItem("class_check_admin_auth", "true");
     } else {
-      setLoginError("ชื่อผู้ใช้หรือรหัสผ่านแอดมินไม่ถูกต้อง (เริ่มต้น: admin / admin123)");
+      setLoginError("ชื่อผู้ใช้หรือรหัสผ่านแอดมินไม่ถูกต้อง");
     }
   };
 
@@ -780,9 +777,6 @@ export default function AdminPage() {
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 text-sm"
               required
             />
-            <p className="text-[11px] text-slate-400 mt-1">
-              รหัสผ่านเริ่มต้นสำหรับทดสอบ: <strong>admin123</strong>
-            </p>
           </div>
 
           <button

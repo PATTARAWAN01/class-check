@@ -162,7 +162,7 @@ export default function OfficialPdfReport({
   return (
     <div
       id="official-pdf-report-modal"
-      className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm overflow-y-auto p-4 sm:p-6 flex justify-center print:static print:inset-auto print:overflow-visible print:p-0 print:m-0 print:bg-white print:block print:w-full print:h-auto"
+      className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm overflow-x-auto overflow-y-auto p-2 sm:p-6 print:static print:inset-auto print:overflow-visible print:p-0 print:m-0 print:bg-white print:block print:w-full print:h-auto"
     >
       <style
         dangerouslySetInnerHTML={{
@@ -184,6 +184,8 @@ export default function OfficialPdfReport({
                 margin: 0 auto !important;
                 box-shadow: none !important;
                 max-width: none !important;
+                min-width: 0 !important;
+                width: 100% !important;
                 min-height: auto !important;
                 border-radius: 0 !important;
               }
@@ -203,32 +205,38 @@ export default function OfficialPdfReport({
       />
 
       {/* Floating Action Controls (Hidden on Print) */}
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-3 no-print">
+      <div className="fixed top-3 left-3 sm:left-auto sm:top-4 sm:right-4 z-50 flex items-center gap-2 sm:gap-3 no-print max-w-[calc(100vw-24px)] overflow-x-auto">
         <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-200 bg-slate-900/90 px-3.5 py-2 rounded-xl shadow-lg border border-slate-700">
           <span>💡 เพื่อความสะอาดของเอกสาร: ในหน้าต่างพิมพ์ ให้เอาเครื่องหมายถูกที่ <strong>"หัวกระดาษและท้ายกระดาษ" (Headers & Footers)</strong> ออก</span>
         </div>
+        <div className="sm:hidden flex items-center gap-1 text-[11px] text-slate-200 bg-slate-900/90 px-2.5 py-1.5 rounded-xl shadow-lg border border-slate-700 whitespace-nowrap">
+          <span>📱</span>
+          <span>เลื่อนซ้าย-ขวา หรือหมุนจอนอน</span>
+        </div>
         <button
           onClick={handlePrint}
-          className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold rounded-xl shadow-lg flex items-center gap-2 transition-all active:scale-95"
+          className="px-3.5 sm:px-4 py-2 sm:py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-lg flex items-center gap-1.5 sm:gap-2 transition-all active:scale-95 whitespace-nowrap"
         >
-          <Printer className="w-4 h-4" />
-          <span>สั่งพิมพ์ / บันทึกเป็น PDF ({isLandscape ? "A4 แนวนอน" : "A4 แนวตั้ง"})</span>
+          <Printer className="w-4 h-4 shrink-0" />
+          <span>สั่งพิมพ์ / PDF</span>
         </button>
         <button
           onClick={onClose}
-          className="p-2.5 bg-white/90 hover:bg-white text-slate-700 hover:text-slate-900 rounded-xl shadow-lg transition-colors"
+          className="p-2 sm:p-2.5 bg-white/90 hover:bg-white text-slate-700 hover:text-slate-900 rounded-xl shadow-lg transition-colors shrink-0"
           title="ปิด"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Official A4 Document Container */}
-      <div
-        className={`report-document-sheet bg-white text-slate-900 w-full ${
-          isLandscape ? "max-w-[297mm] min-h-[210mm]" : "max-w-[210mm] min-h-[297mm]"
-        } p-8 sm:p-12 rounded-2xl shadow-2xl my-auto print:my-0 print:p-0 print:shadow-none print:w-full print:max-w-none print:min-h-0 print:rounded-none font-['Sarabun'] leading-relaxed print:text-black`}
-      >
+      {/* Centering and Mobile Horizontal Panning Wrapper */}
+      <div className="min-w-fit w-full flex justify-start sm:justify-center pt-14 pb-8 sm:py-6">
+        {/* Official A4 Document Container */}
+        <div
+          className={`report-document-sheet bg-white text-slate-900 shrink-0 ${
+            isLandscape ? "w-[297mm] min-w-[297mm] min-h-[210mm]" : "w-[210mm] min-w-[210mm] min-h-[297mm]"
+          } p-6 sm:p-12 rounded-2xl shadow-2xl mx-auto print:m-0 print:p-0 print:shadow-none print:w-full print:max-w-none print:min-w-0 print:min-h-0 print:rounded-none font-['Sarabun'] leading-relaxed print:text-black`}
+        >
         {/* Document Header */}
         <div className="text-center border-b-2 border-slate-900 pb-4 mb-6">
           <div className="w-20 h-20 mx-auto mb-2 flex items-center justify-center">
@@ -567,5 +575,6 @@ export default function OfficialPdfReport({
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 }
