@@ -1,0 +1,30 @@
+{
+  "name": "Class Check - โรงเรียนหนองวัวซอพิทยาคม",
+  "short_name": "Class Check",
+  "description": "ระบบเช็คเวลาเข้าสอนของครู โรงเรียนหนองวัวซอพิทยาคม",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0284c7",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon-280.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon-280.png",
+      "sizes": "280x280",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon-280.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
