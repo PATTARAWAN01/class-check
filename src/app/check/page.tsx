@@ -150,8 +150,11 @@ export default function StudentCheckPage() {
       let ttList: TimetableEntry[] = [];
       if (term) {
         ttList = await getTimetable(term.id);
-        setTimetables(ttList);
       }
+      if (!ttList || ttList.length === 0) {
+        ttList = await getTimetable();
+      }
+      setTimetables(ttList);
 
       // Check cached session
       const savedRoomId = sessionStorage.getItem("class_check_room_id");
@@ -410,10 +413,17 @@ export default function StudentCheckPage() {
       return;
     }
 
+    const roomObj = classrooms.find((c) => c.id === roomId || c.gradeRoom === roomId);
+    const targetRoomId = roomObj?.id || roomId;
+    const targetGradeRoom = roomObj?.gradeRoom || roomId;
+
     // Look up timetable for this room, dayOfWeek, and periodNum
     const matchedTT = currentTT.find(
       (tt) =>
-        tt.classroomId === roomId &&
+        (tt.classroomId === targetRoomId ||
+          tt.classroomId === roomId ||
+          tt.gradeRoom === targetGradeRoom ||
+          tt.gradeRoom === roomId) &&
         tt.dayOfWeek === dayOfWeek &&
         periodNum >= tt.periodStart &&
         periodNum <= tt.periodEnd
@@ -438,9 +448,13 @@ export default function StudentCheckPage() {
       setPeriodStart(matchedTT.periodStart);
       setPeriodEnd(matchedTT.periodEnd);
 
-      // Match subject (matches by code OR id)
+      // Match subject (matches by code OR id OR name)
+      const cleanSubjCode = (matchedTT.subjectCode || "").replace(/\s+/g, "").toUpperCase();
       const sb = currentSubj.find(
-        (s) => s.code === matchedTT.subjectCode || s.id === matchedTT.subjectId
+        (s) =>
+          s.code.replace(/\s+/g, "").toUpperCase() === cleanSubjCode ||
+          s.id === matchedTT.subjectId ||
+          s.name === matchedTT.subjectName
       );
       if (sb) {
         setSelectedSubjectId(sb.id);
@@ -451,20 +465,27 @@ export default function StudentCheckPage() {
       // Check active substitute for this room, date, and period
       const activeSub = currentSubs.find(
         (s) =>
-          s.classroomId === roomId &&
+          (s.classroomId === targetRoomId ||
+            s.classroomId === roomId ||
+            s.gradeRoom === targetGradeRoom) &&
           s.date === dateStr &&
-          s.periodStart === matchedTT.periodStart
+          Number(s.periodStart) <= matchedTT.periodStart &&
+          Number(s.periodEnd) >= matchedTT.periodStart
       );
 
       if (activeSub) {
         setSelectedTeacherId(activeSub.substituteTeacherId);
       } else {
         // Match teacher by id or name
+        const cleanTTTch = (matchedTT.teacherName || "").replace(/^(นาย|นาง|นางสาว)/, "").trim();
         const tch = currentTch.find(
           (t) =>
             t.id === matchedTT.teacherId ||
             t.fullName === matchedTT.teacherName ||
-            `${t.prefix}${t.fullName}` === matchedTT.teacherName
+            `${t.prefix}${t.fullName}` === matchedTT.teacherName ||
+            t.fullName === cleanTTTch ||
+            t.fullName.includes(cleanTTTch) ||
+            cleanTTTch.includes(t.fullName)
         );
         if (tch) {
           setSelectedTeacherId(tch.id);
@@ -553,7 +574,8 @@ export default function StudentCheckPage() {
   // Subjects taught in this classroom (Strictly room-only, excluding non-checkable activities)
   const roomSubjects = useMemo(() => {
     if (!selectedRoomId) return [];
-    return subjects.filter((s) => {
+    const room = classrooms.find((c) => c.id === selectedRoomId);
+    const list = subjects.filter((s) => {
       // 1. Exclude non-checkable activities (บำเพ็ญประโยชน์, พัฒนาทักษะชีวิต, ลูกเสือ, ชุมนุม)
       if (isExcludedActivity(s.name) || isExcludedActivity(s.code)) return false;
 
@@ -561,12 +583,22 @@ export default function StudentCheckPage() {
       const inAssigned = s.assignedClassroomIds?.includes(selectedRoomId);
       const inTimetable = timetables.some(
         (tt) =>
-          tt.classroomId === selectedRoomId &&
+          (tt.classroomId === selectedRoomId ||
+            (room && tt.gradeRoom === room.gradeRoom)) &&
           (tt.subjectId === s.id || tt.subjectCode === s.code)
       );
       return inAssigned || inTimetable;
     });
-  }, [selectedRoomId, timetables, subjects]);
+
+    // Safeguard: if selectedSubjectId is set, ensure it is available in options
+    if (selectedSubjectId) {
+      const cur = subjects.find((s) => s.id === selectedSubjectId);
+      if (cur && !list.some((s) => s.id === cur.id)) {
+        list.push(cur);
+      }
+    }
+    return list;
+  }, [selectedRoomId, classrooms, timetables, subjects, selectedSubjectId]);
 
   // Currently selected subject object
   const selectedSubject = useMemo(() => {
@@ -605,8 +637,16 @@ export default function StudentCheckPage() {
       );
     });
 
-    return [...deptTeachers, ...crossTeachers];
-  }, [selectedSubject, isGuidanceOrAntiCorruption, teachers, timetables]);
+    const res = [...deptTeachers, ...crossTeachers];
+    // Safeguard: if selectedTeacherId is set, ensure it is available in options
+    if (selectedTeacherId) {
+      const curTch = teachers.find((t) => t.id === selectedTeacherId);
+      if (curTch && !res.some((t) => t.id === curTch.id)) {
+        res.push(curTch);
+      }
+    }
+    return res;
+  }, [selectedSubject, isGuidanceOrAntiCorruption, teachers, timetables, selectedTeacherId]);
 
   // Teachers grouped by department for optgroups when showing all teachers
   const teachersByDepartment = useMemo(() => {
@@ -621,15 +661,18 @@ export default function StudentCheckPage() {
 
   // Active substitute assignment for currently selected room, date, and period
   const currentSubstitute = useMemo(() => {
+    const currentRoom = classrooms.find((c) => c.id === selectedRoomId);
     return (
       substitutes.find(
         (s) =>
-          s.classroomId === selectedRoomId &&
+          (s.classroomId === selectedRoomId ||
+            (currentRoom && s.gradeRoom === currentRoom.gradeRoom)) &&
           s.date === checkDate &&
-          s.periodStart === periodStart
+          Number(s.periodStart) <= periodStart &&
+          Number(s.periodEnd) >= periodStart
       ) || null
     );
-  }, [substitutes, selectedRoomId, checkDate, periodStart]);
+  }, [substitutes, selectedRoomId, checkDate, periodStart, classrooms]);
 
   // Auto-select substitute teacher if one is assigned for this period
   useEffect(() => {

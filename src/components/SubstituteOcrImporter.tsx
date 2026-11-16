@@ -28,6 +28,12 @@ import {
 import { saveSubstituteAssignment } from "@/lib/storage";
 import { DEPARTMENTS } from "@/lib/constants";
 import { getThaiDateString } from "@/lib/dateUtils";
+import {
+  extractJpegFromPdf,
+  parseThaiDate,
+  parseDepartment,
+  parseOcrTextToItems,
+} from "@/lib/ocrService";
 
 export interface OcrParsedItem {
   id: string;
@@ -63,6 +69,7 @@ export interface OcrApiResponse {
   assignedCount?: number;
   unassignedCount?: number;
   items?: OcrParsedItem[];
+  rawText?: string;
   error?: string;
 }
 
@@ -87,6 +94,7 @@ export default function SubstituteOcrImporter({
   const [isDragging, setIsDragging] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanStep, setScanStep] = useState<string>("");
+  const [progressPercent, setProgressPercent] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string>("");
 
   // Result state
@@ -115,35 +123,155 @@ export default function SubstituteOcrImporter({
     processOcr(selectedFile);
   };
 
+  // Browser-side OCR fallback (guarantees zero timeout and works anywhere)
+  const runBrowserOcr = async (fileToUpload: File) => {
+    setScanStep("กำลังสลับประมวลผล OCR อัตโนมัติบนเบราว์เซอร์ของท่าน (ไม่ติดขีดจำกัดเวลา)...");
+    setProgressPercent(10);
+
+    const arrayBuf = await fileToUpload.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
+    const images = extractJpegFromPdf(buf);
+
+    if (images.length === 0) {
+      throw new Error("ไม่สามารถแยกรูปภาพออกจากไฟล์ PDF หรือรูปภาพนี้ได้");
+    }
+
+    setScanStep("กำลังเตรียมโมเดล AI OCR ภาษาไทย...");
+    setProgressPercent(25);
+
+    const { createWorker } = await import("tesseract.js");
+    const worker = await createWorker("tha+eng");
+
+    let fullOcrText = "";
+    try {
+      for (let idx = 0; idx < Math.min(images.length, 2); idx++) {
+        setScanStep(`กำลังอ่านและวิเคราะห์หน้าเอกสารที่ ${idx + 1}/${Math.min(images.length, 2)}...`);
+        setProgressPercent(35 + idx * 30);
+        const u8 = new Uint8Array(images[idx]);
+        const imgBlob = new Blob([u8], { type: "image/jpeg" });
+        const res = await worker.recognize(imgBlob);
+        fullOcrText += "\n" + res.data.text;
+      }
+    } finally {
+      await worker.terminate();
+    }
+
+    setProgressPercent(95);
+    setScanStep("กำลังจับคู่ตารางสอน ครูผู้สอน และห้องเรียน...");
+
+    const parsedDate = parseThaiDate(fullOcrText);
+    const department = parseDepartment(fullOcrText);
+    const parsedItems = parseOcrTextToItems(fullOcrText, department);
+
+    const mappedItems: OcrParsedItem[] = parsedItems.map((p) => ({
+      id: p.id,
+      periodStart: p.periodStart,
+      periodEnd: p.periodEnd,
+      timeRange: p.timeRange,
+      gradeRoom: p.gradeRoom,
+      classroomId: p.classroomId,
+      roomLocation: p.roomLocation,
+      subjectCode: p.subjectCode,
+      subjectName: p.subjectName,
+      leaveType: p.leaveType,
+      originalTeacherId: p.originalTeacherId,
+      originalTeacherName: p.originalTeacherName,
+      originalTeacherDept: p.originalTeacherDept,
+      substituteTeacherId: p.substituteTeacherId,
+      substituteTeacherName: p.substituteTeacherName,
+      substituteDept: p.substituteTeacherDept || department || "กลุ่มสาระการเรียนรู้",
+      isAssigned: Boolean(p.substituteTeacherId && p.substituteTeacherName !== "ยังไม่มีผู้สอนแทน"),
+      selected: true,
+      rawAbsentTeacher: p.originalTeacherName,
+      rawSubstituteTeacher: p.substituteTeacherName,
+    }));
+
+    setOcrData({
+      success: true,
+      department,
+      thaiDisplayDate: parsedDate ? parsedDate.thaiDisplayDate : "วันที่ระบุในเอกสาร",
+      isoDate: parsedDate ? parsedDate.isoDate : getThaiDateString(),
+      dayOfWeek: parsedDate ? parsedDate.dayOfWeek : 1,
+      rawText: fullOcrText,
+      items: mappedItems,
+    });
+    setItems(mappedItems);
+    setTargetDate(parsedDate ? parsedDate.isoDate : getThaiDateString());
+    setTargetDept(department || authDept || "กลุ่มสาระการเรียนรู้");
+    setProgressPercent(100);
+  };
+
   const processOcr = async (fileToUpload: File) => {
     setIsScanning(true);
-    setScanStep("กำลังอัปโหลดและแยกรูปภาพจากไฟล์เอกสาร...");
+    setProgressPercent(10);
+    setScanStep("กำลังอัปโหลดและส่งให้ระบบ AI OCR วิเคราะห์...");
     setErrorMsg("");
 
     try {
       const formData = new FormData();
       formData.append("file", fileToUpload);
 
-      setScanStep("ระบบ AI OCR กำลังวิเคราะห์ข้อความภาษาไทยและตารางสอน...");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for server
 
-      const res = await fetch("/api/substitute/ocr", {
-        method: "POST",
-        body: formData,
-      });
+      let serverSuccess = false;
+      try {
+        const res = await fetch("/api/substitute/ocr", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-      const data: OcrApiResponse = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "ไม่สามารถอ่านเอกสารได้ กรุณาลองใหม่อีกครั้ง");
+        if (res.ok) {
+          const data: any = await res.json();
+          if (data && data.success) {
+            serverSuccess = true;
+            setProgressPercent(100);
+            setOcrData(data);
+            const serverMapped: OcrParsedItem[] = (data.items || []).map((it: any) => ({
+              id: it.id || `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              periodStart: Number(it.periodStart) || 1,
+              periodEnd: Number(it.periodEnd) || 1,
+              timeRange: it.timeRange || "",
+              gradeRoom: it.gradeRoom || "",
+              classroomId: it.classroomId || "",
+              roomLocation: it.roomLocation || "",
+              subjectCode: it.subjectCode || "",
+              subjectName: it.subjectName || "",
+              leaveType: it.leaveType || "official",
+              originalTeacherId: it.originalTeacherId || "",
+              originalTeacherName: it.originalTeacherName || "",
+              originalTeacherDept: it.originalTeacherDept || "",
+              substituteTeacherId: it.substituteTeacherId || "",
+              substituteTeacherName: it.substituteTeacherName || "ยังไม่มีผู้สอนแทน",
+              substituteDept: it.substituteDept || it.substituteTeacherDept || data.department || authDept || "กลุ่มสาระการเรียนรู้",
+              isAssigned: it.isAssigned !== undefined ? it.isAssigned : Boolean(it.substituteTeacherId && it.substituteTeacherName !== "ยังไม่มีผู้สอนแทน"),
+              selected: it.selected !== undefined ? it.selected : true,
+              rawAbsentTeacher: it.rawAbsentTeacher || it.originalTeacherName || "",
+              rawSubstituteTeacher: it.rawSubstituteTeacher || it.substituteTeacherName || "",
+            }));
+            setItems(serverMapped);
+            setTargetDate(data.isoDate || getThaiDateString());
+            setTargetDept(data.department || authDept || "กลุ่มสาระการเรียนรู้");
+            return;
+          }
+        }
+      } catch (serverErr) {
+        console.warn("Server OCR call did not finish in time, switching to browser OCR:", serverErr);
       }
 
-      setOcrData(data);
-      setItems(data.items || []);
-      setTargetDate(data.isoDate || getThaiDateString());
-      setTargetDept(data.department || authDept || "กลุ่มสาระการเรียนรู้");
+      // If server OCR failed or timed out, run browser OCR directly
+      if (!serverSuccess) {
+        await runBrowserOcr(fileToUpload);
+      }
     } catch (err: any) {
       console.error("OCR upload error:", err);
-      setErrorMsg(err.message || "เกิดข้อผิดพลาดในการอ่านเอกสาร OCR");
+      try {
+        await runBrowserOcr(fileToUpload);
+      } catch (browserErr: any) {
+        setErrorMsg(browserErr?.message || "เกิดข้อผิดพลาดในการอ่านเอกสาร OCR");
+      }
     } finally {
       setIsScanning(false);
       setScanStep("");
@@ -323,10 +451,18 @@ export default function SubstituteOcrImporter({
               />
 
               {isScanning ? (
-                <div className="py-6 flex flex-col items-center justify-center gap-3">
+                <div className="py-6 flex flex-col items-center justify-center gap-3 w-full max-w-sm mx-auto">
                   <RefreshCw className="w-8 h-8 text-sky-600 animate-spin" />
-                  <p className="text-sm font-semibold text-sky-900">{scanStep}</p>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-sm font-semibold text-sky-900 text-center">{scanStep}</p>
+                  {progressPercent > 0 && (
+                    <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden shadow-inner">
+                      <div
+                        className="bg-gradient-to-r from-sky-500 to-indigo-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${progressPercent}%` }}
+                      ></div>
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-400 text-center">
                     โปรดรอสักครู่ ระบบกำลังอ่านภาษาไทยและจับคู่ตารางสอน...
                   </p>
                 </div>

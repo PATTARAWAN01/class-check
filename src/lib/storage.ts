@@ -227,14 +227,28 @@ export async function getTeachers(): Promise<Teacher[]> {
   if (db) {
     try {
       const snapshot = await getDocs(collection(db, "teachers"));
-      if (!snapshot.empty) {
+      if (!snapshot.empty && snapshot.size >= 20) {
         return snapshot.docs.map((d) => d.data() as Teacher);
       }
+      // If Firestore has fewer than 20 teachers (unseeded or partial), auto-seed INITIAL_TEACHERS
+      try {
+        const batch = writeBatch(db);
+        INITIAL_TEACHERS.forEach((t) => batch.set(doc(db!, "teachers", t.id), t));
+        await batch.commit();
+      } catch (err) {
+        console.warn("Auto-seeding teachers error:", err);
+      }
+      return INITIAL_TEACHERS;
     } catch (e) {
-      console.warn(e);
+      console.warn("getTeachers Firestore error:", e);
     }
   }
-  return getLocal<Teacher[]>(STORAGE_KEYS.TEACHERS, INITIAL_TEACHERS);
+  const local = getLocal<Teacher[]>(STORAGE_KEYS.TEACHERS, INITIAL_TEACHERS);
+  if (!local || local.length < 20) {
+    setLocal(STORAGE_KEYS.TEACHERS, INITIAL_TEACHERS);
+    return INITIAL_TEACHERS;
+  }
+  return local;
 }
 
 export async function saveTeacher(teacher: Teacher): Promise<void> {
@@ -276,14 +290,28 @@ export async function getSubjects(): Promise<Subject[]> {
   if (db) {
     try {
       const snapshot = await getDocs(collection(db, "subjects"));
-      if (!snapshot.empty) {
+      if (!snapshot.empty && snapshot.size >= 20) {
         return snapshot.docs.map((d) => d.data() as Subject);
       }
+      // If Firestore has fewer than 20 subjects, auto-seed INITIAL_SUBJECTS
+      try {
+        const batch = writeBatch(db);
+        INITIAL_SUBJECTS.forEach((s) => batch.set(doc(db!, "subjects", s.id), s));
+        await batch.commit();
+      } catch (err) {
+        console.warn("Auto-seeding subjects error:", err);
+      }
+      return INITIAL_SUBJECTS;
     } catch (e) {
-      console.warn(e);
+      console.warn("getSubjects Firestore error:", e);
     }
   }
-  return getLocal<Subject[]>(STORAGE_KEYS.SUBJECTS, INITIAL_SUBJECTS);
+  const local = getLocal<Subject[]>(STORAGE_KEYS.SUBJECTS, INITIAL_SUBJECTS);
+  if (!local || local.length < 20) {
+    setLocal(STORAGE_KEYS.SUBJECTS, INITIAL_SUBJECTS);
+    return INITIAL_SUBJECTS;
+  }
+  return local;
 }
 
 export async function saveSubject(subject: Subject): Promise<void> {
@@ -362,15 +390,44 @@ export async function getTimetable(termId?: string): Promise<TimetableEntry[]> {
         ? query(collection(db, "timetables"), where("termId", "==", termId))
         : collection(db, "timetables");
       const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        return snapshot.docs.map((d) => d.data() as TimetableEntry);
+      if (!snapshot.empty && snapshot.size >= 50) {
+        const list = snapshot.docs.map((d) => d.data() as TimetableEntry);
+        setLocal(STORAGE_KEYS.TIMETABLE, list);
+        return list;
       }
+      // If Firestore has fewer than 50 timetable entries, auto-seed with INITIAL_TIMETABLE in chunks of 400
+      try {
+        for (let i = 0; i < INITIAL_TIMETABLE.length; i += 400) {
+          const chunk = INITIAL_TIMETABLE.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach((tt) => batch.set(doc(db!, "timetables", tt.id), tt));
+          await batch.commit();
+        }
+      } catch (seedErr) {
+        console.warn("Auto-seeding timetables error:", seedErr);
+      }
+      setLocal(STORAGE_KEYS.TIMETABLE, INITIAL_TIMETABLE);
+      return termId
+        ? INITIAL_TIMETABLE.filter((t) => !t.termId || t.termId === termId)
+        : INITIAL_TIMETABLE;
     } catch (e) {
-      console.warn(e);
+      console.warn("getTimetable Firestore error:", e);
     }
   }
   const all = getLocal<TimetableEntry[]>(STORAGE_KEYS.TIMETABLE, INITIAL_TIMETABLE);
-  return termId ? all.filter((t) => t.termId === termId) : all;
+  if (!all || all.length < 50) {
+    setLocal(STORAGE_KEYS.TIMETABLE, INITIAL_TIMETABLE);
+    return termId
+      ? INITIAL_TIMETABLE.filter((t) => !t.termId || t.termId === termId)
+      : INITIAL_TIMETABLE;
+  }
+  const filtered = termId ? all.filter((t) => t.termId === termId) : all;
+  if (filtered.length === 0 && INITIAL_TIMETABLE.length > 0) {
+    return termId
+      ? INITIAL_TIMETABLE.filter((t) => !t.termId || t.termId === termId)
+      : INITIAL_TIMETABLE;
+  }
+  return filtered;
 }
 
 export async function saveTimetable(entries: TimetableEntry[]): Promise<void> {

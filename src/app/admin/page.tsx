@@ -982,15 +982,6 @@ export default function AdminPage() {
           </button>
 
           <button
-            onClick={handleResetSampleData}
-            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-medium text-slate-200 border border-white/10 transition-colors flex items-center gap-1.5"
-            title="รีเซ็ตเป็นข้อมูลตัวอย่างตั้งต้น"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>รีเซ็ต Demo</span>
-          </button>
-
-          <button
             onClick={handleLogout}
             className="px-3.5 py-1.5 rounded-xl bg-rose-600/80 hover:bg-rose-600 text-xs font-semibold text-white transition-colors flex items-center gap-1.5 shadow"
           >
