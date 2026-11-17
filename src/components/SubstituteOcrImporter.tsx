@@ -27,7 +27,7 @@ import {
 } from "@/types";
 import { saveSubstituteAssignment } from "@/lib/storage";
 import { DEPARTMENTS } from "@/lib/constants";
-import { getThaiDateString } from "@/lib/dateUtils";
+import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
 import {
   extractJpegFromPdf,
   parseThaiDate,
@@ -103,6 +103,10 @@ export default function SubstituteOcrImporter({
   const [targetDate, setTargetDate] = useState<string>("");
   const [targetDept, setTargetDept] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
+
+  // Date selection mode (auto from OCR vs manual for backfill)
+  const [dateMode, setDateMode] = useState<"auto" | "manual">("auto");
+  const [manualDate, setManualDate] = useState<string>(() => getThaiOffsetDate(1));
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -196,7 +200,13 @@ export default function SubstituteOcrImporter({
       items: mappedItems,
     });
     setItems(mappedItems);
-    setTargetDate(parsedDate ? parsedDate.isoDate : getThaiDateString());
+    const chosenDate =
+      dateMode === "manual" && manualDate
+        ? manualDate
+        : parsedDate
+        ? parsedDate.isoDate
+        : getThaiDateString();
+    setTargetDate(chosenDate);
     setTargetDept(department || authDept || "กลุ่มสาระการเรียนรู้");
     setProgressPercent(100);
   };
@@ -252,7 +262,11 @@ export default function SubstituteOcrImporter({
               rawSubstituteTeacher: it.rawSubstituteTeacher || it.substituteTeacherName || "",
             }));
             setItems(serverMapped);
-            setTargetDate(data.isoDate || getThaiDateString());
+            const chosenDate =
+              dateMode === "manual" && manualDate
+                ? manualDate
+                : data.isoDate || getThaiDateString();
+            setTargetDate(chosenDate);
             setTargetDept(data.department || authDept || "กลุ่มสาระการเรียนรู้");
             return;
           }
@@ -417,6 +431,96 @@ export default function SubstituteOcrImporter({
               </div>
             )}
 
+            {/* Date Selection Mode Card */}
+            <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 text-left shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4 text-sky-600" />
+                    กำหนดวันที่สำหรับการจัดสอนแทน
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    เลือกให้ระบบตรวจจับจากเอกสาร หรือระบุวันที่ต้องการบันทึก (เหมาะสำหรับบันทึกย้อนหลัง)
+                  </p>
+                </div>
+
+                {/* Mode Selector Toggle */}
+                <div className="inline-flex p-1 bg-white rounded-xl border border-slate-200 shadow-sm shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setDateMode("auto")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      dateMode === "auto"
+                        ? "bg-sky-500 text-white shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    ตรวจจับจากเอกสารอัตโนมัติ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDateMode("manual")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      dateMode === "manual"
+                        ? "bg-sky-500 text-white shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    กำหนดวันที่เอง (บันทึกย้อนหลัง)
+                  </button>
+                </div>
+              </div>
+
+              {/* Manual Date Input & Quick Buttons */}
+              {dateMode === "manual" && (
+                <div className="mt-3 pt-3 border-t border-slate-200/80 flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setManualDate(getThaiOffsetDate(1))}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                        manualDate === getThaiOffsetDate(1)
+                          ? "bg-sky-100 text-sky-800 border-sky-300 ring-1 ring-sky-300 font-bold"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      เมื่อวาน
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualDate(getThaiDateString())}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                        manualDate === getThaiDateString()
+                          ? "bg-sky-100 text-sky-800 border-sky-300 ring-1 ring-sky-300 font-bold"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      วันนี้
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={manualDate}
+                      onChange={(e) => setManualDate(e.target.value)}
+                      className="px-3 py-1.5 text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500"
+                    />
+                    <span className="text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2.5 py-1.5 rounded-lg">
+                      {formatThaiDateLong(manualDate)}
+                    </span>
+                  </div>
+
+                  <p className="w-full text-[11px] text-slate-500 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 inline shrink-0" />
+                    ระบบจะนำข้อมูลสอนแทนเข้าสู่วันที่ที่ท่านเลือกนี้โดยตรง
+                  </p>
+                </div>
+              )}
+            </div>
+
             {/* Drag and Drop Zone */}
             <div
               onDragOver={(e) => {
@@ -539,10 +643,26 @@ export default function SubstituteOcrImporter({
                   {ocrData.department || targetDept}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  ข้อความวันที่จากเอกสาร:{" "}
-                  <span className="font-semibold text-slate-700">
-                    {ocrData.thaiDisplayDate}
-                  </span>
+                  {dateMode === "manual" ? (
+                    <>
+                      กำหนดวันที่เอง:{" "}
+                      <span className="font-bold text-sky-700">
+                        {formatThaiDateLong(targetDate)}
+                      </span>
+                      {ocrData.thaiDisplayDate && ocrData.thaiDisplayDate !== "วันที่ระบุในเอกสาร" && (
+                        <span className="text-slate-400 ml-2">
+                          (ข้อความวันที่ในเอกสาร: {ocrData.thaiDisplayDate})
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      ข้อความวันที่จากเอกสาร:{" "}
+                      <span className="font-semibold text-slate-700">
+                        {ocrData.thaiDisplayDate}
+                      </span>
+                    </>
+                  )}
                 </p>
               </div>
 
