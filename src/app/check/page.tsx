@@ -49,6 +49,7 @@ import {
   SubstituteAssignment,
 } from "@/types";
 import { THAI_DAYS } from "@/lib/constants";
+import { INITIAL_SUBJECTS } from "@/lib/initialData";
 import {
   getThaiDateString,
   getThaiOffsetDate,
@@ -56,7 +57,7 @@ import {
   isWithin7DaysThai,
 } from "@/lib/dateUtils";
 
-// Excluded non-academic activities that should NOT be checked:
+// Excluded non-academic activities, free periods, or tutorial periods that should NOT be checked:
 const EXCLUDED_ACTIVITY_KEYWORDS = [
   "บำเพ็ญประโยชน์",
   "พัฒนาทักษะชีวิต",
@@ -67,6 +68,14 @@ const EXCLUDED_ACTIVITY_KEYWORDS = [
   "ยุวกาชาด",
   "ชุมนุม",
   "สวดมนต์",
+  "ติวโอเน็ต",
+  "ติว O-NET",
+  "ติว",
+  "ซ่อมเสริม",
+  "เลือกเสรี",
+  "โฮมรูม",
+  "พักเที่ยง",
+  "คาบว่าง",
 ];
 
 function isExcludedActivity(nameOrCode?: string): boolean {
@@ -430,15 +439,20 @@ export default function StudentCheckPage() {
     );
 
     if (matchedTT) {
-      // Check if excluded non-academic activity
+      // Check if excluded non-academic activity or activity without teacher/code
       if (
         isExcludedActivity(matchedTT.subjectName) ||
-        isExcludedActivity(matchedTT.subjectCode)
+        isExcludedActivity(matchedTT.subjectCode) ||
+        !matchedTT.subjectCode ||
+        matchedTT.teacherName === "ไม่ระบุ"
       ) {
+        setIsDoublePeriod(false);
+        setPeriodStart(periodNum);
+        setPeriodEnd(periodNum);
         setSelectedSubjectId("");
         setSelectedTeacherId("");
         setAutoDetectedNotice(
-          `📅 ตารางสอน${thaiDayName} คาบที่ ${periodNum}: ${matchedTT.subjectName} (${matchedTT.subjectCode}) ซึ่งเป็นกิจกรรมพัฒนาผู้เรียนที่ไม่ต้องเช็คเวลาเข้าสอน`
+          `📅 ตารางสอน${thaiDayName} คาบที่ ${periodNum}: ${matchedTT.subjectName || matchedTT.subjectCode || "คาบกิจกรรม/ว่าง"} (เป็นกิจกรรม/ติว/คาบว่าง ไม่มีการเรียนการสอนรายวิชาหลัก ไม่ต้องเช็คเวลาเข้าสอน)`
         );
         return;
       }
@@ -532,8 +546,13 @@ export default function StudentCheckPage() {
         `📅 ตารางสอน${thaiDayName} (${periodLabel}): วิชา ${matchedTT.subjectName} (${matchedTT.subjectCode}) - ครูผู้สอน: ${matchedTT.teacherName}${subInfo}`
       );
     } else {
+      setIsDoublePeriod(false);
+      setPeriodStart(periodNum);
+      setPeriodEnd(periodNum);
+      setSelectedSubjectId("");
+      setSelectedTeacherId("");
       setAutoDetectedNotice(
-        `📅 ตารางสอน${thaiDayName}: คาบที่ ${periodNum} ไม่พบวิชาในตารางสอน สามารถเลือกวิชาและครูผู้สอนเองได้`
+        `📅 ตารางสอน${thaiDayName}: คาบที่ ${periodNum} เป็นคาบว่าง (ไม่มีข้อมูลในตารางสอน ไม่คาดเดารายวิชาล่วงหน้า)`
       );
     }
   };
@@ -561,14 +580,11 @@ export default function StudentCheckPage() {
     }
   };
 
-  // Handle clicking a period button (immediately syncs timetable)
+  // Handle clicking a period button (immediately syncs timetable without carrying over previous state)
   const handlePeriodStartChange = (val: number) => {
     setPeriodStart(val);
-    if (isDoublePeriod) {
-      setPeriodEnd(Math.min(val + 1, periods.length || 7));
-    } else {
-      setPeriodEnd(val);
-    }
+    setPeriodEnd(val);
+    setIsDoublePeriod(false);
     if (selectedRoomId) {
       syncWithTimetable(selectedRoomId, checkDate, val);
     }
@@ -826,6 +842,54 @@ export default function StudentCheckPage() {
       const teacher = teachers.find((t) => t.id === selectedTeacherId);
       const subject = subjects.find((s) => s.id === selectedSubjectId);
 
+      // Multi-tier subject code and name resolution (guarantees subjectCode and subjectName are never empty)
+      let resolvedCode = "";
+      let resolvedName = "";
+
+      const cleanSubjId = (selectedSubjectId || "").replace(/\s+/g, "").toUpperCase();
+      const foundSubj =
+        subjects.find(
+          (s) =>
+            s.id === selectedSubjectId ||
+            s.code === selectedSubjectId ||
+            (s.code && s.code.replace(/\s+/g, "").toUpperCase() === cleanSubjId) ||
+            `SUBJ_${(s.code || "").replace(/\s+/g, "").toUpperCase()}` === cleanSubjId
+        ) ||
+        roomSubjects.find((s) => s.id === selectedSubjectId);
+
+      if (foundSubj) {
+        resolvedCode = foundSubj.code || "";
+        resolvedName = foundSubj.name || "";
+      } else {
+        const tt = timetables.find(
+          (t) =>
+            t.subjectId === selectedSubjectId ||
+            t.subjectCode === selectedSubjectId ||
+            (t.subjectCode &&
+              (t.subjectCode.replace(/\s+/g, "").toUpperCase() === cleanSubjId ||
+                `SUBJ_${t.subjectCode.replace(/\s+/g, "").toUpperCase()}` === cleanSubjId))
+        );
+        if (tt) {
+          resolvedCode = tt.subjectCode || "";
+          resolvedName = tt.subjectName || "";
+        } else {
+          const initSubj = INITIAL_SUBJECTS.find(
+            (s) =>
+              s.id === selectedSubjectId ||
+              s.code === selectedSubjectId ||
+              (s.code && s.code.replace(/\s+/g, "").toUpperCase() === cleanSubjId) ||
+              `SUBJ_${(s.code || "").replace(/\s+/g, "").toUpperCase()}` === cleanSubjId
+          );
+          if (initSubj) {
+            resolvedCode = initSubj.code || "";
+            resolvedName = initSubj.name || "";
+          } else if (selectedSubjectId) {
+            resolvedCode = selectedSubjectId.replace(/^subj_/, "");
+            resolvedName = resolvedCode;
+          }
+        }
+      }
+
       const periodCount = isDoublePeriod ? periodEnd - periodStart + 1 : 1;
       const parsedDate = new Date(checkDate);
       const dayOfWeek = parsedDate.getDay() || 1;
@@ -847,8 +911,8 @@ export default function StudentCheckPage() {
           classroomId: selectedRoomId,
           gradeRoom: room?.gradeRoom || editingRecord.gradeRoom,
           subjectId: selectedSubjectId,
-          subjectCode: subject?.code || editingRecord.subjectCode,
-          subjectName: subject?.name || editingRecord.subjectName,
+          subjectCode: resolvedCode || subject?.code || editingRecord.subjectCode || "",
+          subjectName: resolvedName || subject?.name || editingRecord.subjectName || "",
           teacherId: selectedTeacherId,
           teacherName: teacher ? `${teacher.prefix}${teacher.fullName}` : editingRecord.teacherName,
           status,
@@ -876,8 +940,8 @@ export default function StudentCheckPage() {
           classroomId: selectedRoomId,
           gradeRoom: room?.gradeRoom || "ห้องเรียน",
           subjectId: selectedSubjectId,
-          subjectCode: subject?.code || "",
-          subjectName: subject?.name || "",
+          subjectCode: resolvedCode || subject?.code || "",
+          subjectName: resolvedName || subject?.name || "",
           teacherId: selectedTeacherId,
           teacherName: teacher ? `${teacher.prefix}${teacher.fullName}` : "ไม่ระบุ",
           status,

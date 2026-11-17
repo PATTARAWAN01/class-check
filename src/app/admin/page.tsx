@@ -333,11 +333,11 @@ export default function AdminPage() {
       const q = attSearch.toLowerCase().trim();
       list = list.filter(
         (r) =>
-          r.teacherName.toLowerCase().includes(q) ||
-          r.subjectCode.toLowerCase().includes(q) ||
-          r.subjectName.toLowerCase().includes(q) ||
+          (r.teacherName || "").toLowerCase().includes(q) ||
+          (r.subjectCode || "").toLowerCase().includes(q) ||
+          (r.subjectName || "").toLowerCase().includes(q) ||
           (r.recordedByStudent && r.recordedByStudent.toLowerCase().includes(q)) ||
-          r.gradeRoom.toLowerCase().includes(q) ||
+          (r.gradeRoom || "").toLowerCase().includes(q) ||
           (r.absenceNote && r.absenceNote.toLowerCase().includes(q))
       );
     }
@@ -1479,7 +1479,25 @@ export default function AdminPage() {
                           </td>
                           <td className="p-3">
                             <div className="font-semibold text-slate-800">
-                              {log.subjectCode} {log.subjectName}
+                              {log.subjectCode || log.subjectName ? (
+                                `${log.subjectCode} ${log.subjectName}`.trim()
+                              ) : (
+                                (() => {
+                                  const s =
+                                    subjects.find(
+                                      (sub) =>
+                                        sub.id === log.subjectId ||
+                                        (log.subjectId &&
+                                          sub.code === log.subjectId.replace(/^subj_/, ""))
+                                    ) ||
+                                    timetable.find((t: any) => t.subjectId === log.subjectId);
+                                  return s
+                                    ? `${(s as any).code || (s as any).subjectCode || ""} ${(s as any).name || (s as any).subjectName || ""}`.trim()
+                                    : log.subjectId
+                                    ? log.subjectId.replace(/^subj_/, "")
+                                    : "ไม่ระบุวิชา";
+                                })()
+                              )}
                             </div>
                           </td>
                           <td className="p-3">
