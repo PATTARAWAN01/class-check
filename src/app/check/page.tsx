@@ -448,16 +448,34 @@ export default function StudentCheckPage() {
       setPeriodStart(matchedTT.periodStart);
       setPeriodEnd(matchedTT.periodEnd);
 
-      // Match subject (matches by code OR id OR name)
+      // Match subject (matches by code OR id OR name, resilient to spacing and spelling)
       const cleanSubjCode = (matchedTT.subjectCode || "").replace(/\s+/g, "").toUpperCase();
-      const sb = currentSubj.find(
-        (s) =>
-          s.code.replace(/\s+/g, "").toUpperCase() === cleanSubjCode ||
+      const normSubjName = (name: string) =>
+        (name || "")
+          .replace(/\s+/g, "")
+          .replace(/วิทยศาสตร์/g, "วิทยาศาสตร์")
+          .toLowerCase();
+
+      const matchedNameNorm = normSubjName(matchedTT.subjectName);
+
+      const sb = currentSubj.find((s) => {
+        const sCode = (s.code || "").replace(/\s+/g, "").toUpperCase();
+        const sNameNorm = normSubjName(s.name);
+        return (
+          (cleanSubjCode && sCode === cleanSubjCode) ||
           s.id === matchedTT.subjectId ||
-          s.name === matchedTT.subjectName
-      );
+          (cleanSubjCode && (sCode.includes(cleanSubjCode) || cleanSubjCode.includes(sCode))) ||
+          (matchedNameNorm && sNameNorm === matchedNameNorm) ||
+          (matchedNameNorm && (sNameNorm.includes(matchedNameNorm) || matchedNameNorm.includes(sNameNorm)))
+        );
+      });
+
       if (sb) {
         setSelectedSubjectId(sb.id);
+      } else if (matchedTT.subjectId) {
+        setSelectedSubjectId(matchedTT.subjectId);
+      } else if (cleanSubjCode) {
+        setSelectedSubjectId(`subj_${cleanSubjCode}`);
       } else {
         setSelectedSubjectId("");
       }
@@ -476,17 +494,25 @@ export default function StudentCheckPage() {
       if (activeSub) {
         setSelectedTeacherId(activeSub.substituteTeacherId);
       } else {
-        // Match teacher by id or name
-        const cleanTTTch = (matchedTT.teacherName || "").replace(/^(นาย|นาง|นางสาว)/, "").trim();
-        const tch = currentTch.find(
-          (t) =>
+        // Match teacher by id or name (resilient to prefix and variant spelling like โตบำรุง / โถบำรุง)
+        const normTeacherName = (str: string) =>
+          (str || "")
+            .replace(/^(นาย|นาง|นางสาว)/, "")
+            .replace(/\s+/g, "")
+            .replace(/โถบำรุง/g, "โตบำรุง")
+            .trim();
+
+        const cleanTTTch = normTeacherName(matchedTT.teacherName);
+        const tch = currentTch.find((t) => {
+          const tNorm = normTeacherName(t.fullName);
+          return (
             t.id === matchedTT.teacherId ||
             t.fullName === matchedTT.teacherName ||
             `${t.prefix}${t.fullName}` === matchedTT.teacherName ||
-            t.fullName === cleanTTTch ||
-            t.fullName.includes(cleanTTTch) ||
-            cleanTTTch.includes(t.fullName)
-        );
+            (cleanTTTch && tNorm === cleanTTTch) ||
+            (cleanTTTch && (tNorm.includes(cleanTTTch) || cleanTTTch.includes(tNorm)))
+          );
+        });
         if (tch) {
           setSelectedTeacherId(tch.id);
         } else {
@@ -575,25 +601,62 @@ export default function StudentCheckPage() {
   const roomSubjects = useMemo(() => {
     if (!selectedRoomId) return [];
     const room = classrooms.find((c) => c.id === selectedRoomId);
+    const normSubjName = (name: string) =>
+      (name || "")
+        .replace(/\s+/g, "")
+        .replace(/วิทยศาสตร์/g, "วิทยาศาสตร์")
+        .toLowerCase();
+
     const list = subjects.filter((s) => {
       // 1. Exclude non-checkable activities (บำเพ็ญประโยชน์, พัฒนาทักษะชีวิต, ลูกเสือ, ชุมนุม)
       if (isExcludedActivity(s.name) || isExcludedActivity(s.code)) return false;
 
       // 2. Check if assigned to this classroom
       const inAssigned = s.assignedClassroomIds?.includes(selectedRoomId);
-      const inTimetable = timetables.some(
-        (tt) =>
-          (tt.classroomId === selectedRoomId ||
-            (room && tt.gradeRoom === room.gradeRoom)) &&
-          (tt.subjectId === s.id || tt.subjectCode === s.code)
-      );
+      const sCode = (s.code || "").replace(/\s+/g, "").toUpperCase();
+      const sNameNorm = normSubjName(s.name);
+
+      const inTimetable = timetables.some((tt) => {
+        const isThisRoom =
+          tt.classroomId === selectedRoomId ||
+          tt.classroomId === room?.gradeRoom ||
+          (room && tt.gradeRoom === room.gradeRoom);
+        if (!isThisRoom) return false;
+
+        const ttCode = (tt.subjectCode || "").replace(/\s+/g, "").toUpperCase();
+        const ttNameNorm = normSubjName(tt.subjectName);
+
+        return (
+          tt.subjectId === s.id ||
+          (sCode && ttCode === sCode) ||
+          (sNameNorm && ttNameNorm === sNameNorm)
+        );
+      });
       return inAssigned || inTimetable;
     });
 
     // Safeguard: if selectedSubjectId is set, ensure it is available in options
     if (selectedSubjectId) {
-      const cur = subjects.find((s) => s.id === selectedSubjectId);
-      if (cur && !list.some((s) => s.id === cur.id)) {
+      let cur = subjects.find((s) => s.id === selectedSubjectId);
+      if (!cur) {
+        // If not found directly in subjects, synthesize from timetables so option exists
+        const cleanTargetId = (selectedSubjectId || "").replace(/\s+/g, "").toUpperCase();
+        const tt = timetables.find(
+          (t) =>
+            t.subjectId === selectedSubjectId ||
+            (t.subjectCode && (t.subjectCode.replace(/\s+/g, "").toUpperCase() === cleanTargetId || `SUBJ_${t.subjectCode.replace(/\s+/g, "").toUpperCase()}` === cleanTargetId))
+        );
+        if (tt) {
+          cur = {
+            id: selectedSubjectId,
+            code: tt.subjectCode,
+            name: tt.subjectName,
+            department: "กลุ่มสาระการเรียนรู้",
+            assignedClassroomIds: [selectedRoomId],
+          };
+        }
+      }
+      if (cur && !list.some((s) => s.id === cur.id || s.code === cur.code)) {
         list.push(cur);
       }
     }
