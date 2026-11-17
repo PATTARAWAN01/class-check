@@ -1857,6 +1857,7 @@ export default function AdminPage() {
                   teachers={teachers}
                   classrooms={classrooms}
                   subjects={subjects}
+                  timetable={timetable}
                   activeTerm={terms.find((t) => t.isActive) || terms[0] || null}
                   authDept="งานวิชาการ"
                   onImportComplete={async (count: number) => {

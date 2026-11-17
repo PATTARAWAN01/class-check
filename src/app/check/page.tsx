@@ -472,17 +472,26 @@ export default function StudentCheckPage() {
 
       const matchedNameNorm = normSubjName(matchedTT.subjectName);
 
-      const sb = currentSubj.find((s) => {
+      // Exact subject code / ID match has highest priority!
+      let sb = currentSubj.find((s) => {
         const sCode = (s.code || "").replace(/\s+/g, "").toUpperCase();
-        const sNameNorm = normSubjName(s.name);
-        return (
-          (cleanSubjCode && sCode === cleanSubjCode) ||
-          s.id === matchedTT.subjectId ||
-          (cleanSubjCode && (sCode.includes(cleanSubjCode) || cleanSubjCode.includes(sCode))) ||
-          (matchedNameNorm && sNameNorm === matchedNameNorm) ||
-          (matchedNameNorm && (sNameNorm.includes(matchedNameNorm) || matchedNameNorm.includes(sNameNorm)))
-        );
+        return (cleanSubjCode && sCode === cleanSubjCode) || s.id === matchedTT.subjectId;
       });
+
+      // Fallback: if no exact code match, match by classroom assigned + name, or normalized name
+      if (!sb && matchedNameNorm) {
+        sb =
+          currentSubj.find((s) => {
+            const sNameNorm = normSubjName(s.name);
+            const isNameMatch = sNameNorm === matchedNameNorm;
+            const isRoomAssigned = s.assignedClassroomIds?.includes(targetRoomId);
+            return isNameMatch && isRoomAssigned;
+          }) ||
+          currentSubj.find((s) => {
+            const sNameNorm = normSubjName(s.name);
+            return sNameNorm === matchedNameNorm;
+          });
+      }
 
       if (sb) {
         setSelectedSubjectId(sb.id);
@@ -645,7 +654,7 @@ export default function StudentCheckPage() {
         return (
           tt.subjectId === s.id ||
           (sCode && ttCode === sCode) ||
-          (sNameNorm && ttNameNorm === sNameNorm)
+          (!ttCode && sNameNorm && ttNameNorm === sNameNorm)
         );
       });
       return inAssigned || inTimetable;

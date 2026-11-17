@@ -21,6 +21,7 @@ import {
   Teacher,
   Classroom,
   Subject,
+  TimetableEntry,
   AcademicTerm,
   SubstituteAssignment,
   SubstituteLeaveType,
@@ -56,6 +57,7 @@ export interface OcrParsedItem {
   selected: boolean;
   rawAbsentTeacher: string;
   rawSubstituteTeacher: string;
+  isFromTimetable?: boolean;
 }
 
 export interface OcrApiResponse {
@@ -77,6 +79,7 @@ interface SubstituteOcrImporterProps {
   teachers: Teacher[];
   classrooms: Classroom[];
   subjects: Subject[];
+  timetable?: TimetableEntry[];
   activeTerm: AcademicTerm | null;
   authDept?: string;
   onImportComplete: (count: number) => void;
@@ -86,6 +89,7 @@ export default function SubstituteOcrImporter({
   teachers,
   classrooms,
   subjects,
+  timetable = [],
   activeTerm,
   authDept = "งานวิชาการ",
   onImportComplete,
@@ -118,6 +122,87 @@ export default function SubstituteOcrImporter({
     sick: { text: "ลาป่วย", bg: "bg-rose-50", textCol: "text-rose-700" },
     personal: { text: "ลากิจ", bg: "bg-amber-50", textCol: "text-amber-700" },
     official: { text: "ไปราชการ", bg: "bg-blue-50", textCol: "text-blue-700" },
+  };
+
+  // Helper to cross-reference items with master timetable (Master Timetable Cross-Check)
+  const crossCheckWithTimetable = (
+    itemList: OcrParsedItem[],
+    dateStr: string
+  ): OcrParsedItem[] => {
+    if (!timetable || timetable.length === 0 || !dateStr) return itemList;
+
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length < 3 || isNaN(parts[0])) return itemList;
+
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    const jsDay = d.getDay();
+    const dayOfWeek = jsDay === 0 ? 7 : jsDay;
+
+    return itemList.map((it) => {
+      const roomNorm = (it.gradeRoom || "").replace(/\s+/g, "");
+
+      // Match room + dayOfWeek + period in school timetable
+      const ttMatch = timetable.find((tt) => {
+        const ttRoomNorm = (tt.gradeRoom || "").replace(/\s+/g, "");
+        const isRoomMatch =
+          (it.classroomId && tt.classroomId === it.classroomId) ||
+          (roomNorm && ttRoomNorm === roomNorm);
+        if (!isRoomMatch) return false;
+        if (tt.dayOfWeek !== dayOfWeek) return false;
+
+        const p = it.periodStart;
+        const pEnd = it.periodEnd || p;
+        return (
+          (p >= tt.periodStart && p <= tt.periodEnd) ||
+          (tt.periodStart >= p && tt.periodStart <= pEnd)
+        );
+      });
+
+      if (!ttMatch) return it;
+
+      const needsSubject =
+        !it.subjectCode ||
+        it.subjectName === "รายวิชาตามตารางสอน" ||
+        it.subjectCode.trim() === "";
+
+      const needsTeacher =
+        !it.originalTeacherName ||
+        !it.originalTeacherId ||
+        it.originalTeacherName.trim() === "";
+
+      const updated = { ...it };
+
+      if (needsSubject && ttMatch.subjectCode) {
+        updated.subjectCode = ttMatch.subjectCode;
+        updated.subjectName = ttMatch.subjectName;
+        updated.isFromTimetable = true;
+      }
+
+      if (needsTeacher && ttMatch.teacherName) {
+        updated.originalTeacherName = ttMatch.teacherName;
+        updated.originalTeacherId = ttMatch.teacherId;
+        updated.isFromTimetable = true;
+      }
+
+      // Fill teacher department if missing or generic
+      if (!updated.originalTeacherDept || updated.originalTeacherDept === "กลุ่มสาระการเรียนรู้") {
+        const foundTch = teachers.find(
+          (t) =>
+            t.id === updated.originalTeacherId ||
+            t.fullName === updated.originalTeacherName ||
+            `${t.prefix}${t.fullName}` === updated.originalTeacherName
+        );
+        if (foundTch) {
+          updated.originalTeacherDept = foundTch.department;
+        }
+      }
+
+      if (!updated.roomLocation && ttMatch.roomLocation) {
+        updated.roomLocation = `ห้อง ${ttMatch.roomLocation}`;
+      }
+
+      return updated;
+    });
   };
 
   // Handle file drop / select
@@ -190,6 +275,15 @@ export default function SubstituteOcrImporter({
       rawSubstituteTeacher: p.substituteTeacherName,
     }));
 
+    const chosenDate =
+      dateMode === "manual" && manualDate
+        ? manualDate
+        : parsedDate
+        ? parsedDate.isoDate
+        : getThaiDateString();
+
+    const crossCheckedItems = crossCheckWithTimetable(mappedItems, chosenDate);
+
     setOcrData({
       success: true,
       department,
@@ -197,15 +291,9 @@ export default function SubstituteOcrImporter({
       isoDate: parsedDate ? parsedDate.isoDate : getThaiDateString(),
       dayOfWeek: parsedDate ? parsedDate.dayOfWeek : 1,
       rawText: fullOcrText,
-      items: mappedItems,
+      items: crossCheckedItems,
     });
-    setItems(mappedItems);
-    const chosenDate =
-      dateMode === "manual" && manualDate
-        ? manualDate
-        : parsedDate
-        ? parsedDate.isoDate
-        : getThaiDateString();
+    setItems(crossCheckedItems);
     setTargetDate(chosenDate);
     setTargetDept(department || authDept || "กลุ่มสาระการเรียนรู้");
     setProgressPercent(100);
@@ -261,11 +349,14 @@ export default function SubstituteOcrImporter({
               rawAbsentTeacher: it.rawAbsentTeacher || it.originalTeacherName || "",
               rawSubstituteTeacher: it.rawSubstituteTeacher || it.substituteTeacherName || "",
             }));
-            setItems(serverMapped);
             const chosenDate =
               dateMode === "manual" && manualDate
                 ? manualDate
                 : data.isoDate || getThaiDateString();
+
+            const crossCheckedServer = crossCheckWithTimetable(serverMapped, chosenDate);
+
+            setItems(crossCheckedServer);
             setTargetDate(chosenDate);
             setTargetDept(data.department || authDept || "กลุ่มสาระการเรียนรู้");
             return;
@@ -686,12 +777,28 @@ export default function SubstituteOcrImporter({
                 <label className="block text-xs font-bold text-slate-600 mb-1">
                   📅 วันที่บันทึกผล (ปรับเปลี่ยนได้)
                 </label>
-                <input
-                  type="date"
-                  value={targetDate}
-                  onChange={(e) => setTargetDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-sky-500"
-                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={targetDate}
+                    onChange={(e) => {
+                      const newD = e.target.value;
+                      setTargetDate(newD);
+                      setItems((prev) => crossCheckWithTimetable(prev, newD));
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-sky-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setItems((prev) => crossCheckWithTimetable(prev, targetDate));
+                    }}
+                    title="ซิงก์ดึงข้อมูลวิชาและครูจากตารางสอนหลักตามวันที่นี้ใหม่"
+                    className="p-2 rounded-xl border border-sky-200 bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs shrink-0 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -846,13 +953,24 @@ export default function SubstituteOcrImporter({
                           <p className="text-slate-600 text-[11px] line-clamp-1">
                             {item.subjectName}
                           </p>
+                          {item.isFromTimetable && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-1">
+                              <Sparkles className="w-2.5 h-2.5" />
+                              ตรวจสอบตรงกับตารางสอน
+                            </span>
+                          )}
                         </td>
 
                         {/* Absent Teacher & Leave Type */}
                         <td className="p-3.5">
                           <p className="font-bold text-slate-800">
-                            {item.originalTeacherName}
+                            {item.originalTeacherName || "ไม่ระบุครูที่ลา"}
                           </p>
+                          {item.originalTeacherDept && (
+                            <p className="text-[10px] text-slate-400">
+                              {item.originalTeacherDept.replace("กลุ่มสาระการเรียนรู้", "")}
+                            </p>
+                          )}
                           <div className="flex items-center gap-1.5 mt-1">
                             <select
                               value={item.leaveType}
@@ -907,12 +1025,92 @@ export default function SubstituteOcrImporter({
                               }`}
                             >
                               <option value="">-- ยังไม่มีผู้สอนแทน (เว้นว่าง) --</option>
-                              {teachers.map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.prefix}
-                                  {t.fullName} ({t.department.replace("กลุ่มสาระการเรียนรู้", "")})
-                                </option>
-                              ))}
+                              {(() => {
+                                const rowDept =
+                                  item.originalTeacherDept || targetDept || authDept || "";
+                                const cleanRowDept = rowDept
+                                  .replace("กลุ่มสาระการเรียนรู้", "")
+                                  .trim();
+
+                                // 1. Priority Department Teachers (Same Department as row)
+                                const priorityTeachers = teachers
+                                  .filter((t) => {
+                                    const cleanT = (t.department || "")
+                                      .replace("กลุ่มสาระการเรียนรู้", "")
+                                      .trim();
+                                    return (
+                                      cleanT &&
+                                      cleanRowDept &&
+                                      (cleanT.includes(cleanRowDept) ||
+                                        cleanRowDept.includes(cleanT))
+                                    );
+                                  })
+                                  .sort((a, b) =>
+                                    a.fullName.localeCompare(b.fullName, "th")
+                                  );
+
+                                // 2. Other Departments (excluding priority dept)
+                                const otherDepts = DEPARTMENTS.filter((d) => {
+                                  const cleanD = d
+                                    .replace("กลุ่มสาระการเรียนรู้", "")
+                                    .trim();
+                                  return (
+                                    !cleanD.includes(cleanRowDept) &&
+                                    !cleanRowDept.includes(cleanD)
+                                  );
+                                });
+
+                                return (
+                                  <>
+                                    {priorityTeachers.length > 0 && (
+                                      <optgroup
+                                        label={`⭐ ${rowDept} (${priorityTeachers.length} ท่าน - แนะนำ)`}
+                                      >
+                                        {priorityTeachers.map((t) => (
+                                          <option key={t.id} value={t.id}>
+                                            {t.prefix}{t.fullName}
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    )}
+
+                                    {otherDepts.map((dept) => {
+                                      const deptTeachers = teachers
+                                        .filter((t) => {
+                                          const cleanT = (t.department || "")
+                                            .replace("กลุ่มสาระการเรียนรู้", "")
+                                            .trim();
+                                          const cleanD = dept
+                                            .replace("กลุ่มสาระการเรียนรู้", "")
+                                            .trim();
+                                          return (
+                                            cleanT === cleanD ||
+                                            cleanT.includes(cleanD) ||
+                                            cleanD.includes(cleanT)
+                                          );
+                                        })
+                                        .sort((a, b) =>
+                                          a.fullName.localeCompare(b.fullName, "th")
+                                        );
+
+                                      if (deptTeachers.length === 0) return null;
+
+                                      return (
+                                        <optgroup
+                                          key={dept}
+                                          label={`📂 ${dept} (${deptTeachers.length} ท่าน)`}
+                                        >
+                                          {deptTeachers.map((t) => (
+                                            <option key={t.id} value={t.id}>
+                                              {t.prefix}{t.fullName}
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      );
+                                    })}
+                                  </>
+                                );
+                              })()}
                             </select>
                           </div>
                         </td>
