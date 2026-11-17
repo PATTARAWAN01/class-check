@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { Teacher, Subject, TimetableEntry, AttendanceRecord } from "@/types";
+import { getThaiDateString } from "@/lib/dateUtils";
 
 // ==================== 1. TEACHER TEMPLATE & PARSER ====================
 
@@ -221,7 +222,8 @@ export function exportAttendanceToExcel(
   const worksheet = XLSX.utils.json_to_sheet(data);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "ข้อมูลการเข้าสอน");
-  XLSX.writeFile(workbook, `รายงานการเข้าสอนครู_${schoolName}_${termLabel}.xlsx`);
+  const todayStr = getThaiDateString();
+  XLSX.writeFile(workbook, `รายงานการเข้าสอนครู_${todayStr}.xlsx`);
 }
 
 // ==================== 5. EXPORT SUBSTITUTE STATS TO EXCEL ====================
@@ -249,5 +251,6 @@ export function exportSubstituteStatsToExcel(
   const worksheet = XLSX.utils.json_to_sheet(data);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "สถิติครูผู้สอนแทน");
-  XLSX.writeFile(workbook, `สถิติครูผู้เข้าสอนแทน_${schoolName}_${timeRangeLabel}.xlsx`);
+  const todayStr = getThaiDateString();
+  XLSX.writeFile(workbook, `รายงานสรุปสอนแทนสะสมรายบุคคล_${todayStr}.xlsx`);
 }

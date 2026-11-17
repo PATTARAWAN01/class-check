@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Printer, X, Sparkles, UserCheck, ShieldCheck } from "lucide-react";
+import React, { useEffect } from "react";
+import { Printer, X, Sparkles, UserCheck } from "lucide-react";
 import { AcademicTerm, SchoolProfile, SubstituteAssignment, Teacher } from "@/types";
 import { formatThaiDateLong, getThaiDateString } from "@/lib/dateUtils";
 
@@ -22,18 +22,7 @@ export default function OfficialSubstitutePdfReport({
   dateRangeLabel,
   onClose,
 }: OfficialSubstitutePdfReportProps) {
-  // Aggregate KPIs
   const totalSubPeriods = substitutes.length;
-  const subTeachersSet = new Set(
-    substitutes.map((s) => s.substituteTeacherId || s.substituteTeacherName).filter(Boolean)
-  );
-  const absentTeachersSet = new Set(
-    substitutes.map((s) => s.originalTeacherId || s.originalTeacherName).filter(Boolean)
-  );
-
-  const sickCount = substitutes.filter((s) => s.leaveType === "sick").length;
-  const personalCount = substitutes.filter((s) => s.leaveType === "personal").length;
-  const officialCount = substitutes.filter((s) => s.leaveType === "official").length;
 
   // Aggregate stats per substitute teacher
   const teacherSubStats = React.useMemo(() => {
@@ -81,8 +70,24 @@ export default function OfficialSubstitutePdfReport({
     return Array.from(map.values()).sort((a, b) => b.periodsCount - a.periodsCount);
   }, [substitutes, teachers]);
 
+  const pdfFileName = `รายงานสรุปสอนแทนสะสมรายบุคคล_${getThaiDateString()}`;
+
+  // Automatically set document.title so browser's "Save as PDF" uses this filename
+  useEffect(() => {
+    const prevTitle = document.title;
+    document.title = pdfFileName;
+    return () => {
+      document.title = prevTitle;
+    };
+  }, [pdfFileName]);
+
   const handlePrint = () => {
+    const prevTitle = document.title;
+    document.title = pdfFileName;
     window.print();
+    setTimeout(() => {
+      document.title = prevTitle;
+    }, 1000);
   };
 
   const termDisplay = term
@@ -122,7 +127,7 @@ export default function OfficialSubstitutePdfReport({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 12mm 15mm 15mm 15mm;
+            margin: 12mm 15mm 12mm 15mm;
           }
           html, body {
             background: white !important;
@@ -141,10 +146,6 @@ export default function OfficialSubstitutePdfReport({
             max-width: 100% !important;
             width: 100% !important;
           }
-          .page-break-before {
-            page-break-before: always !important;
-            break-before: page !important;
-          }
           .avoid-break {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
@@ -156,12 +157,12 @@ export default function OfficialSubstitutePdfReport({
         {/* Modal Top Bar (Hidden on Print) */}
         <div className="bg-slate-900 text-white p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 no-print">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
               <Sparkles className="w-6 h-6" />
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold">
-                รายงานสถิติการจัดสอนแทนและครูผู้เข้าสอนแทน (Official PDF Report)
+                รายงานสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคล (PDF)
               </h2>
               <p className="text-xs text-slate-400">
                 โรงเรียนหนองวัวซอพิทยาคม &bull; เอกสารทางการฝ่ายบริหารงานวิชาการ
@@ -173,7 +174,7 @@ export default function OfficialSubstitutePdfReport({
             <button
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-colors"
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-colors"
             >
               <Printer className="w-4 h-4" />
               <span>พิมพ์รายงาน (Print / Save as PDF)</span>
@@ -192,7 +193,7 @@ export default function OfficialSubstitutePdfReport({
         <div className="p-6 sm:p-10 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 font-sans leading-relaxed report-sheet">
           {/* 1. Official Header */}
           <div className="text-center border-b-2 border-slate-900 pb-5 mb-5 relative">
-            <div className="flex items-center justify-center gap-3 mb-2">
+            <div className="flex items-center justify-center gap-3.5 mb-2.5">
               <img
                 src="/LOGO-N.png"
                 alt="โรงเรียนหนองวัวซอพิทยาคม"
@@ -212,68 +213,27 @@ export default function OfficialSubstitutePdfReport({
             </div>
 
             <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-2">
-              รายงานสรุปสถิติการจัดสอนแทนและการปฏิบัติหน้าที่สอนแทนของครูผู้สอน
+              รายงานสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคล
             </h2>
-            <p className="text-xs text-slate-600 mt-0.5">
+            <p className="text-xs text-slate-600 mt-1">
               ประจำ{termDisplay} &bull; ช่วงเวลาที่รายงาน: <strong>{dateRangeLabel}</strong>
             </p>
 
-            <div className="text-right text-[10px] text-slate-500 mt-1">
+            <div className="text-right text-[10px] text-slate-500 mt-1.5">
               วันที่พิมพ์เอกสาร: {todayThai}
             </div>
           </div>
 
-          {/* 2. Executive KPI Box */}
-          <div className="bg-slate-50 border border-slate-300 rounded-2xl p-4 mb-6 avoid-break print:bg-white print:border-slate-400">
-            <div className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-sky-700" />
-              <span>สรุปภาพรวมการจัดสอนแทนในช่วงเวลาที่รายงาน</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
-              <div className="bg-white p-3 rounded-xl border border-slate-200">
-                <div className="text-[11px] text-slate-500">คาบจัดสอนแทนรวม</div>
-                <div className="text-2xl font-black text-indigo-700 mt-0.5">
-                  {totalSubPeriods} <span className="text-xs font-normal text-slate-500">คาบ</span>
-                </div>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-slate-200">
-                <div className="text-[11px] text-slate-500">ครูผู้เข้าสอนแทน</div>
-                <div className="text-2xl font-black text-sky-700 mt-0.5">
-                  {subTeachersSet.size} <span className="text-xs font-normal text-slate-500">ท่าน</span>
-                </div>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-slate-200">
-                <div className="text-[11px] text-slate-500">ครูที่ขอลา</div>
-                <div className="text-2xl font-black text-slate-800 mt-0.5">
-                  {absentTeachersSet.size} <span className="text-xs font-normal text-slate-500">ท่าน</span>
-                </div>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-slate-200 text-left space-y-1 text-[11px]">
-                <div className="text-slate-500 font-bold">จำแนกตามประเภทการลา:</div>
-                <div className="flex justify-between">
-                  <span className="text-rose-700">&bull; ลาป่วย:</span>
-                  <strong>{sickCount} คาบ</strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-amber-700">&bull; ลากิจ:</span>
-                  <strong>{personalCount} คาบ</strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-blue-700">&bull; ไปราชการ:</span>
-                  <strong>{officialCount} คาบ</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Section 1: Summary Table per Substitute Teacher */}
-          <div className="mb-6 avoid-break">
-            <h3 className="text-sm font-bold text-slate-900 border-b border-slate-300 pb-1 mb-2.5 flex items-center justify-between">
-              <span>ตอนที่ 1: บัญชีสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคล</span>
-              <span className="text-xs font-normal text-slate-500">
+          {/* 2. Main Summary Table per Substitute Teacher */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                บัญชีสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคล
+              </h3>
+              <span className="text-xs text-slate-500 font-medium">
                 (ครูผู้สอนแทนทั้งหมด {teacherSubStats.length} ท่าน)
               </span>
-            </h3>
+            </div>
 
             <table className="w-full text-xs text-left border-collapse border border-slate-300">
               <thead className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
@@ -291,7 +251,7 @@ export default function OfficialSubstitutePdfReport({
               <tbody>
                 {teacherSubStats.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-6 text-center text-slate-400 border border-slate-300">
+                    <td colSpan={6} className="p-8 text-center text-slate-400 border border-slate-300">
                       ไม่พบข้อมูลการปฏิบัติหน้าที่สอนแทนในช่วงเวลานี้
                     </td>
                   </tr>
@@ -307,15 +267,15 @@ export default function OfficialSubstitutePdfReport({
                       <td className="p-2 border border-slate-300 text-slate-600">
                         {item.dept.replace("กลุ่มสาระการเรียนรู้", "")}
                       </td>
-                      <td className="p-2 border border-slate-300 text-center font-bold text-indigo-900 font-mono text-sm">
+                      <td className="p-2 border border-slate-300 text-center font-bold text-indigo-950 font-mono text-sm">
                         {item.periodsCount}
                       </td>
                       <td className="p-2 border border-slate-300 text-[10px] text-slate-600">
                         {item.details
                           .map((d) => `${d.gradeRoom} (คาบ ${d.period})`)
-                          .slice(0, 4)
+                          .slice(0, 5)
                           .join(", ")}
-                        {item.details.length > 4 && ` และอีก ${item.details.length - 4} คาบ`}
+                        {item.details.length > 5 && ` และอีก ${item.details.length - 5} คาบ`}
                       </td>
                       <td className="p-2 border border-slate-300 text-center text-slate-300">
                         .....................
@@ -328,7 +288,7 @@ export default function OfficialSubstitutePdfReport({
                     <td colSpan={3} className="p-2 border border-slate-300 text-right">
                       รวมจำนวนคาบที่ครูเข้าสอนแทนทั้งสิ้น:
                     </td>
-                    <td className="p-2 border border-slate-300 text-center text-sm font-mono text-indigo-900">
+                    <td className="p-2 border border-slate-300 text-center text-sm font-mono text-indigo-950">
                       {totalSubPeriods} คาบ
                     </td>
                     <td colSpan={2} className="p-2 border border-slate-300 text-slate-500 text-[10px]">
@@ -340,86 +300,23 @@ export default function OfficialSubstitutePdfReport({
             </table>
           </div>
 
-          {/* 4. Section 2: Detailed Substitute Log (Chronological) */}
-          <div className="mb-8 avoid-break">
-            <h3 className="text-sm font-bold text-slate-900 border-b border-slate-300 pb-1 mb-2.5 flex items-center justify-between">
-              <span>ตอนที่ 2: บัญชีรายละเอียดรายการจัดสอนแทนรายคาบ</span>
-              <span className="text-xs font-normal text-slate-500">
-                ({substitutes.length} คาบเรียน)
-              </span>
-            </h3>
-
-            <table className="w-full text-xs text-left border-collapse border border-slate-300">
-              <thead className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300 text-[11px]">
-                <tr>
-                  <th className="p-1.5 border border-slate-300 w-10 text-center">ลำดับ</th>
-                  <th className="p-1.5 border border-slate-300 w-24 text-center">วันที่ & คาบ</th>
-                  <th className="p-1.5 border border-slate-300 w-20 text-center">ห้องเรียน</th>
-                  <th className="p-1.5 border border-slate-300">วิชาที่สอน</th>
-                  <th className="p-1.5 border border-slate-300">ครูประจำวิชาที่ขอลา</th>
-                  <th className="p-1.5 border border-slate-300 w-16 text-center">สาเหตุการลา</th>
-                  <th className="p-1.5 border border-slate-300">ครูผู้ปฏิบัติหน้าที่สอนแทน</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {substitutes.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-6 text-center text-slate-400 border border-slate-300">
-                      ไม่พบประวัติรายการจัดสอนแทน
-                    </td>
-                  </tr>
-                ) : (
-                  substitutes.map((s, idx) => (
-                    <tr key={s.id || idx} className="hover:bg-slate-50/80">
-                      <td className="p-1.5 border border-slate-300 text-center font-mono text-[10px]">
-                        {idx + 1}
-                      </td>
-                      <td className="p-1.5 border border-slate-300 text-center text-[10px] whitespace-nowrap">
-                        <span className="font-bold">{s.date}</span> (คาบ {s.periodStart})
-                      </td>
-                      <td className="p-1.5 border border-slate-300 text-center font-bold">
-                        {s.gradeRoom}
-                      </td>
-                      <td className="p-1.5 border border-slate-300 text-[10px]">
-                        <strong>{s.subjectCode}</strong> {s.subjectName}
-                      </td>
-                      <td className="p-1.5 border border-slate-300 font-semibold text-slate-800">
-                        {s.originalTeacherName}
-                      </td>
-                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">
-                        {s.leaveType === "sick"
-                          ? "ลาป่วย"
-                          : s.leaveType === "personal"
-                          ? "ลากิจ"
-                          : "ไปราชการ"}
-                      </td>
-                      <td className="p-1.5 border border-slate-300 font-bold text-indigo-900">
-                        {s.substituteTeacherName || "ยังไม่มีผู้สอนแทน"}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* 5. Section 3: Official Signatures (3 Signers) */}
+          {/* 3. Official Signatures (3 Signers) */}
           <div className="mt-8 pt-4 border-t border-slate-300 avoid-break">
             <p className="text-[11px] text-slate-600 mb-6 text-center italic">
-              ขอรับรองว่ารายงานสถิติการจัดสอนแทนและการปฏิบัติหน้าที่สอนแทนของครูผู้สอนฉบับนี้ ถูกต้องตรงตามความเป็นจริงทุกประการ
+              ขอรับรองว่ารายงานสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคลฉบับนี้ ถูกต้องตรงตามความเป็นจริงทุกประการ
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs">
               {signers.map((signer, idx) => (
                 <div key={idx} className="space-y-1">
-                  <div className="font-semibold text-slate-600 text-[11px]">
+                  <div className="font-semibold text-slate-700 text-[11px]">
                     ({signer.roleTitle || "ผู้ลงนาม"})
                   </div>
                   <div className="pt-10 border-b border-dotted border-slate-400 mx-auto w-44"></div>
-                  <div className="font-bold text-slate-800 pt-1">
+                  <div className="font-bold text-slate-900 pt-1">
                     ({signer.name})
                   </div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-[11px] text-slate-600">
                     {signer.position}
                   </div>
                   <div className="text-[10px] text-slate-400 pt-0.5">
@@ -434,7 +331,7 @@ export default function OfficialSubstitutePdfReport({
         {/* Modal Footer (Hidden on Print) */}
         <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-3 no-print">
           <div>
-            💡 <strong className="text-slate-700">คำแนะนำ:</strong> สามารถกดสั่งพิมพ์เพื่อพิมพ์ออกเครื่องพิมพ์ หรือเลือกปลายทางเป็น <strong>&quot;บันทึกเป็น PDF (Save as PDF)&quot;</strong> เพื่อจัดเก็บไฟล์เอกสารราชการได้ทันที
+            💡 <strong className="text-slate-700">คำแนะนำ:</strong> เมื่อกดสั่งพิมพ์และเลือก <strong>&quot;บันทึกเป็น PDF (Save as PDF)&quot;</strong> ระบบจะตั้งชื่อไฟล์เริ่มต้นเป็น <strong>&quot;{pdfFileName}.pdf&quot;</strong> ให้อัตโนมัติ
           </div>
           <button
             type="button"

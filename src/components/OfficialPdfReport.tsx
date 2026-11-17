@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import { Printer, X } from "lucide-react";
 import { AcademicTerm, AttendanceRecord, SchoolProfile, Teacher } from "@/types";
+import { getThaiDateString } from "@/lib/dateUtils";
 
 interface OfficialPdfReportProps {
   schoolProfile: SchoolProfile;
@@ -153,8 +154,25 @@ export default function OfficialPdfReport({
       );
   }, [teacher, teachers, records]);
 
+  const pdfFileName = teacher
+    ? `รายงานการเข้าสอน_${teacher.fullName.replace(/\s+/g, "_")}_${getThaiDateString()}`
+    : `รายงานการเข้าสอนภาพรวม_${getThaiDateString()}`;
+
+  useEffect(() => {
+    const prevTitle = document.title;
+    document.title = pdfFileName;
+    return () => {
+      document.title = prevTitle;
+    };
+  }, [pdfFileName]);
+
   const handlePrint = () => {
+    const prevTitle = document.title;
+    document.title = pdfFileName;
     window.print();
+    setTimeout(() => {
+      document.title = prevTitle;
+    }, 1000);
   };
 
   const isLandscape = !teacher;
