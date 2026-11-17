@@ -35,6 +35,11 @@ import {
   Square,
   Filter,
   ClipboardList,
+  Dices,
+  KeyRound,
+  Copy,
+  Check,
+  Save,
 } from "lucide-react";
 import Link from "next/link";
 import SubstituteOcrImporter from "@/components/SubstituteOcrImporter";
@@ -95,7 +100,9 @@ import { DEPARTMENTS, THAI_DAYS } from "@/lib/constants";
 import { INITIAL_SUBJECTS } from "@/lib/initialData";
 import OfficialPdfReport from "@/components/OfficialPdfReport";
 import ClassroomQrPrint from "@/components/ClassroomQrPrint";
+import ClassroomPinPrintModal from "@/components/ClassroomPinPrintModal";
 import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
+import { generateSecurePin } from "@/lib/pinUtils";
 
 type AdminTab =
   | "reports"
@@ -159,6 +166,10 @@ export default function AdminPage() {
   const [pdfTermId, setPdfTermId] = useState<string>("");
   const [classroomGradeFilter, setClassroomGradeFilter] = useState<string>("all");
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showPinPrintModal, setShowPinPrintModal] = useState(false);
+  const [gradeDraftPins, setGradeDraftPins] = useState<Record<string, string>>({});
+  const [gradeSaving, setGradeSaving] = useState<Record<string, boolean>>({});
+  const [copiedGrade, setCopiedGrade] = useState<string | null>(null);
   const [showSchoolImporter, setShowSchoolImporter] = useState(false);
 
   // Attendance Records Backend State (Live Real-time Monitoring)
@@ -1022,6 +1033,104 @@ export default function AdminPage() {
     await saveClassroom(updated);
     setClassrooms(classrooms.map((c) => (c.id === cls.id ? updated : c)));
     showNotice(`อัปเดตรหัส PIN ของห้อง ${cls.gradeRoom} สำเร็จ`);
+  };
+
+  // Randomize all rooms in a specific grade
+  const handleRandomizeGradePins = (grade: string) => {
+    const roomsInGrade = classrooms.filter((c) => c.grade === grade);
+    if (roomsInGrade.length === 0) return;
+
+    // Existing PINs of other rooms not in this grade
+    const otherPins = classrooms
+      .filter((c) => c.grade !== grade)
+      .map((c) => gradeDraftPins[c.id] || c.pinCode);
+
+    const newDrafts = { ...gradeDraftPins };
+    const usedPins = [...otherPins];
+
+    for (const room of roomsInGrade) {
+      const pin = generateSecurePin(usedPins);
+      newDrafts[room.id] = pin;
+      usedPins.push(pin);
+    }
+
+    setGradeDraftPins(newDrafts);
+    showNotice(`🎲 สุ่ม PIN ใหม่ระดับชั้น ${grade} แล้ว (${roomsInGrade.length} ห้อง) — กรุณากดปุ่มบันทึก`);
+  };
+
+  // Randomize a single room PIN
+  const handleRandomizeSingleRoomPin = (cls: Classroom) => {
+    const otherPins = classrooms
+      .filter((c) => c.id !== cls.id)
+      .map((c) => gradeDraftPins[c.id] || c.pinCode);
+
+    const pin = generateSecurePin(otherPins);
+    setGradeDraftPins((prev) => ({ ...prev, [cls.id]: pin }));
+    showNotice(`🎲 สุ่ม PIN ห้อง ${cls.gradeRoom} เป็น ${pin} — กรุณากดปุ่มบันทึก`);
+  };
+
+  // Save all rooms in a specific grade to Firestore
+  const handleSaveGradePins = async (grade: string) => {
+    const roomsInGrade = classrooms.filter((c) => c.grade === grade);
+    if (roomsInGrade.length === 0) return;
+
+    setGradeSaving((prev) => ({ ...prev, [grade]: true }));
+    try {
+      const updatedRooms: Classroom[] = [];
+      for (const room of roomsInGrade) {
+        const newPin = gradeDraftPins[room.id];
+        if (newPin && newPin.trim() && newPin.trim() !== room.pinCode) {
+          const updated = { ...room, pinCode: newPin.trim() };
+          await saveClassroom(updated);
+          updatedRooms.push(updated);
+        }
+      }
+
+      if (updatedRooms.length > 0) {
+        setClassrooms((prev) =>
+          prev.map((c) => {
+            const found = updatedRooms.find((u) => u.id === c.id);
+            return found || c;
+          })
+        );
+        // Clear saved rooms from draft pins
+        setGradeDraftPins((prev) => {
+          const next = { ...prev };
+          for (const u of updatedRooms) {
+            delete next[u.id];
+          }
+          return next;
+        });
+      }
+
+      showNotice(`💾 บันทึกรหัส PIN ระดับชั้น ${grade} สำเร็จเรียบร้อยแล้ว (${roomsInGrade.length} ห้อง)`);
+    } catch (err: any) {
+      console.error("Save grade pins error:", err);
+      alert("เกิดข้อผิดพลาดในการบันทึกรหัส PIN: " + (err?.message || err));
+    } finally {
+      setGradeSaving((prev) => ({ ...prev, [grade]: false }));
+    }
+  };
+
+  // Copy all PINs for a grade to clipboard for LINE forwarding
+  const handleCopyGradePins = (grade: string) => {
+    const roomsInGrade = classrooms
+      .filter((c) => c.grade === grade)
+      .sort((a, b) => a.gradeRoom.localeCompare(b.gradeRoom, "th", { numeric: true }));
+
+    const activeTermObj = terms.find((t) => t.isActive) || terms[0];
+    const termLabel = activeTermObj ? `ภาคเรียนที่ ${activeTermObj.term}/${activeTermObj.year}` : "ภาคเรียนที่ 2/2569";
+    let text = `📌 รหัส PIN เข้าเช็คชื่อ ระดับชั้น ${grade}\nโรงเรียนหนองวัวซอพิทยาคม (${termLabel})\n----------------------------\n`;
+    for (const r of roomsInGrade) {
+      const pin = gradeDraftPins[r.id] || r.pinCode;
+      text += `• ห้อง ${r.gradeRoom} : PIN [ ${pin} ]\n`;
+    }
+    text += `\n* หมายเหตุ: สำหรับหัวหน้าห้องใช้ล็อกอินเข้าเช็คชื่อ ห้ามเผยแพร่ข้ามห้อง`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedGrade(grade);
+    setTimeout(() => setCopiedGrade(null), 2500);
+    showNotice(`📋 คัดลอกรหัส PIN ระดับชั้น ${grade} แล้ว พร้อมวางใน LINE ได้ทันที`);
   };
 
   const handleDeleteClassroom = async (id: string, name: string) => {
@@ -3331,14 +3440,24 @@ export default function AdminPage() {
                   จัดการห้องเรียนและรหัส PIN ประจำห้อง
                 </h2>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowQrModal(true)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm"
-              >
-                <QrCode className="w-4 h-4" />
-                <span>พิมพ์แผ่น QR Code ประจำห้อง (27 ห้อง)</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPinPrintModal(true)}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm"
+                >
+                  <KeyRound className="w-4 h-4" />
+                  <span>📄 พิมพ์ใบสรุปรหัส PIN (Print/PDF)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowQrModal(true)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>พิมพ์แผ่น QR Code ประจำห้อง (27 ห้อง)</span>
+                </button>
+              </div>
             </div>
 
             {/* Add Classroom */}
@@ -3418,7 +3537,7 @@ export default function AdminPage() {
                       className="bg-slate-50/80 rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-3"
                     >
                       {/* Grade Section Header */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
                         <div className="flex items-center gap-2.5">
                           <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-extrabold text-xs flex items-center justify-center shadow-xs">
                             {grade}
@@ -3433,9 +3552,75 @@ export default function AdminPage() {
                           </div>
                         </div>
 
-                        <span className="text-[11px] text-slate-400">
-                          * แก้ไขรหัส PIN แล้วคลิกนอกช่องเพื่อบันทึกอัตโนมัติ
-                        </span>
+                        {/* Grade Actions: Randomize, Save, Copy */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleRandomizeGradePins(grade)}
+                            className="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs"
+                            title={`สุ่มรหัส PIN 4 หลักแบบคาดเดาไม่ได้ให้กับทุกห้องในระดับชั้น ${grade}`}
+                          >
+                            <Dices className="w-3.5 h-3.5" />
+                            <span>สุ่ม PIN ทั้งระดับ {grade}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={gradeSaving[grade]}
+                            onClick={() => handleSaveGradePins(grade)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs ${
+                              roomsInGrade.some(
+                                (c) =>
+                                  gradeDraftPins[c.id] !== undefined &&
+                                  gradeDraftPins[c.id] !== c.pinCode
+                              )
+                                ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-md ring-2 ring-emerald-300"
+                                : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300"
+                            }`}
+                            title={`บันทึกรหัส PIN ประจำระดับชั้น ${grade} ลงระบบ`}
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>
+                              {gradeSaving[grade]
+                                ? "กำลังบันทึก..."
+                                : `💾 บันทึก PIN ระดับ ${grade}`}
+                            </span>
+                            {roomsInGrade.filter(
+                              (c) =>
+                                gradeDraftPins[c.id] !== undefined &&
+                                gradeDraftPins[c.id] !== c.pinCode
+                            ).length > 0 && (
+                              <span className="w-4 h-4 rounded-full bg-white text-emerald-700 text-[10px] font-black flex items-center justify-center ml-0.5 shadow-xs">
+                                {
+                                  roomsInGrade.filter(
+                                    (c) =>
+                                      gradeDraftPins[c.id] !== undefined &&
+                                      gradeDraftPins[c.id] !== c.pinCode
+                                  ).length
+                                }
+                              </span>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyGradePins(grade)}
+                            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all flex items-center gap-1.5"
+                            title={`คัดลอกรหัส PIN ของห้องในระดับชั้น ${grade} เพื่อส่งใน LINE`}
+                          >
+                            {copiedGrade === grade ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="text-emerald-700 font-bold">คัดลอกแล้ว!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" />
+                                <span>คัดลอกรหัส</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
 
                       {/* Rooms in Grade Grid */}
@@ -3445,39 +3630,77 @@ export default function AdminPage() {
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                          {roomsInGrade.map((cls) => (
-                            <div
-                              key={cls.id}
-                              className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-xs hover:border-indigo-300 transition-all flex flex-col justify-between space-y-2.5"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="font-extrabold text-slate-900 text-sm">
-                                  ห้อง {cls.gradeRoom}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteClassroom(cls.id, cls.gradeRoom)}
-                                  className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                                  title="ลบห้องเรียนนี้"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                          {roomsInGrade.map((cls) => {
+                            const currentPin =
+                              gradeDraftPins[cls.id] !== undefined
+                                ? gradeDraftPins[cls.id]
+                                : cls.pinCode;
+                            const isModified =
+                              gradeDraftPins[cls.id] !== undefined &&
+                              gradeDraftPins[cls.id] !== cls.pinCode;
 
-                              <div className="flex items-center justify-between gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                                <span className="text-[11px] font-semibold text-slate-600">
-                                  PIN:
-                                </span>
-                                <input
-                                  type="text"
-                                  maxLength={6}
-                                  defaultValue={cls.pinCode}
-                                  onBlur={(e) => handleUpdateRoomPin(cls, e.target.value)}
-                                  className="w-20 px-2 py-0.5 text-xs font-mono font-bold text-center border border-slate-300 rounded bg-white text-slate-900 focus:ring-1 focus:ring-indigo-500"
-                                />
+                            return (
+                              <div
+                                key={cls.id}
+                                className={`p-3.5 rounded-xl border bg-white shadow-xs transition-all flex flex-col justify-between space-y-2.5 ${
+                                  isModified
+                                    ? "border-purple-300 ring-2 ring-purple-100"
+                                    : "border-slate-200 hover:border-indigo-300"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-extrabold text-slate-900 text-sm">
+                                      ห้อง {cls.gradeRoom}
+                                    </span>
+                                    {isModified && (
+                                      <span className="text-[9px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                                        ยังไม่บันทึก
+                                      </span>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteClassroom(cls.id, cls.gradeRoom)}
+                                    className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                    title="ลบห้องเรียนนี้"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                                  <span className="text-[11px] font-semibold text-slate-600 shrink-0">
+                                    PIN:
+                                  </span>
+                                  <input
+                                    type="text"
+                                    maxLength={6}
+                                    value={currentPin}
+                                    onChange={(e) => {
+                                      setGradeDraftPins({
+                                        ...gradeDraftPins,
+                                        [cls.id]: e.target.value.trim(),
+                                      });
+                                    }}
+                                    className={`w-20 px-2 py-0.5 text-xs font-mono font-bold text-center border rounded bg-white text-slate-900 focus:ring-1 focus:ring-indigo-500 ${
+                                      isModified
+                                        ? "border-purple-400 bg-purple-50/50 text-purple-900 font-black"
+                                        : "border-slate-300"
+                                    }`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRandomizeSingleRoomPin(cls)}
+                                    className="p-1 rounded-md text-purple-600 hover:bg-purple-100 transition-colors"
+                                    title="สุ่ม PIN เฉพาะห้องนี้ใหม่"
+                                  >
+                                    <Dices className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -3781,6 +4004,21 @@ export default function AdminPage() {
         classrooms={classrooms}
         isOpen={showQrModal}
         onClose={() => setShowQrModal(false)}
+      />
+
+      {/* ========================================================== */}
+      {/* CLASSROOM PIN SUMMARY PRINT MODAL */}
+      {/* ========================================================== */}
+      <ClassroomPinPrintModal
+        classrooms={classrooms}
+        isOpen={showPinPrintModal}
+        onClose={() => setShowPinPrintModal(false)}
+        activeTermLabel={
+          (() => {
+            const t = terms.find((term) => term.isActive) || terms[0];
+            return t ? `ภาคเรียนที่ ${t.term}/${t.year}` : "ภาคเรียนที่ 2/2569";
+          })()
+        }
       />
 
       {/* ========================================================== */}

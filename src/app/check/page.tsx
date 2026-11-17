@@ -104,6 +104,27 @@ export default function StudentCheckPage() {
   const [authError, setAuthError] = useState("");
   const [qrScannedRoom, setQrScannedRoom] = useState<string | null>(null);
 
+  // Anti-Brute Force PIN state
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockUntil, setLockUntil] = useState<number | null>(null);
+  const [lockSecondsLeft, setLockSecondsLeft] = useState(0);
+
+  useEffect(() => {
+    if (!lockUntil) return;
+    const timer = setInterval(() => {
+      const left = Math.ceil((lockUntil - Date.now()) / 1000);
+      if (left <= 0) {
+        setLockUntil(null);
+        setLockSecondsLeft(0);
+        setFailedAttempts(0);
+        setAuthError("");
+      } else {
+        setLockSecondsLeft(left);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockUntil]);
+
   // Check-in Form state (in Thai Bangkok Timezone UTC+7)
   const todayStr = useMemo(() => getThaiDateString(), []);
   const [checkDate, setCheckDate] = useState(() => getThaiDateString());
@@ -323,6 +344,11 @@ export default function StudentCheckPage() {
     e.preventDefault();
     setAuthError("");
 
+    if (lockUntil && Date.now() < lockUntil) {
+      setAuthError(`⛔ คุณใส่รหัส PIN ผิดเกิน 5 ครั้ง ระบบระงับชั่วคราวเพื่อความปลอดภัย กรุณารออีก ${lockSecondsLeft} วินาที`);
+      return;
+    }
+
     if (!selectedRoomId) {
       setAuthError("กรุณาเลือกระดับชั้น/ห้องเรียน");
       return;
@@ -338,11 +364,24 @@ export default function StudentCheckPage() {
 
     const targetRoom = classrooms.find((c) => c.id === selectedRoomId);
     if (!targetRoom || targetRoom.pinCode !== pinInput.trim()) {
-      setAuthError("รหัส PIN ของห้องเรียนไม่ถูกต้อง กรุณาตรวจสอบกับครูประจำชั้นหรือหัวหน้าห้อง");
+      const nextFailed = failedAttempts + 1;
+      setFailedAttempts(nextFailed);
+
+      if (nextFailed >= 5) {
+        const lockDuration = 60 * 1000;
+        setLockUntil(Date.now() + lockDuration);
+        setLockSecondsLeft(60);
+        setAuthError("⛔ คุณใส่รหัส PIN ผิดติดต่อกัน 5 ครั้ง ระบบระงับชั่วคราว 60 วินาที เพื่อความปลอดภัย");
+      } else {
+        setAuthError(`รหัส PIN ของห้องเรียนไม่ถูกต้อง (สามารถลองใหม่ได้อีก ${5 - nextFailed} ครั้ง)`);
+      }
       return;
     }
 
-    // Success login
+    // Success login: reset brute force trackers
+    setFailedAttempts(0);
+    setLockUntil(null);
+    setLockSecondsLeft(0);
     setIsRoomAuthenticated(true);
     sessionStorage.setItem("class_check_room_id", selectedRoomId);
     sessionStorage.setItem("class_check_student", studentName.trim());
@@ -1192,11 +1231,14 @@ export default function StudentCheckPage() {
                 maxLength={6}
                 inputMode="numeric"
                 pattern="[0-9]*"
+                disabled={Boolean(lockUntil && lockSecondsLeft > 0)}
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
-                placeholder="••••"
+                placeholder={lockUntil && lockSecondsLeft > 0 ? "🔒 ระงับชั่วคราว..." : "••••"}
                 className={`w-full px-4 py-3 rounded-xl border text-lg tracking-widest text-center font-mono font-bold transition-all ${
-                  pinInput.length >= 4
+                  lockUntil && lockSecondsLeft > 0
+                    ? "border-rose-300 bg-rose-50/50 text-rose-400 cursor-not-allowed"
+                    : pinInput.length >= 4
                     ? "border-2 border-emerald-600 bg-emerald-50/50 text-emerald-950 shadow-xs"
                     : "border-slate-300 bg-white text-slate-700 focus:ring-2 focus:ring-sky-500"
                 }`}
@@ -1210,6 +1252,7 @@ export default function StudentCheckPage() {
               </label>
               <input
                 type="text"
+                disabled={Boolean(lockUntil && lockSecondsLeft > 0)}
                 value={studentName}
                 onChange={(e) => setStudentName(e.target.value)}
                 placeholder="เช่น ด.ช.ธนกฤต เลขที่ 1 (หัวหน้าห้อง)"
@@ -1224,10 +1267,21 @@ export default function StudentCheckPage() {
 
             <button
               type="submit"
-              className="w-full mt-2 py-3 px-4 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-semibold rounded-xl transition-all shadow-md shadow-sky-600/25 flex items-center justify-center gap-2 text-sm"
+              disabled={Boolean(lockUntil && lockSecondsLeft > 0)}
+              className={`w-full mt-2 py-3 px-4 font-semibold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm ${
+                lockUntil && lockSecondsLeft > 0
+                  ? "bg-slate-400 text-slate-100 cursor-not-allowed shadow-none"
+                  : "bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white shadow-sky-600/25"
+              }`}
             >
-              <span>เข้าสู่หน้าบันทึกการสอน</span>
-              <ArrowRight className="w-4 h-4" />
+              {lockUntil && lockSecondsLeft > 0 ? (
+                <span>🔒 ระบบระงับชั่วคราว (รออีก {lockSecondsLeft} วินาที)</span>
+              ) : (
+                <>
+                  <span>เข้าสู่หน้าบันทึกการสอน</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
         </div>
