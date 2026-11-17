@@ -289,7 +289,51 @@ export default function AdminPage() {
       );
     }
 
-    return list.sort((a, b) => b.date.localeCompare(a.date) || a.periodStart - b.periodStart);
+    // Helper to get department index according to official DEPARTMENTS
+    const getDeptRank = (deptStr: string) => {
+      const clean = (deptStr || "").replace("กลุ่มสาระการเรียนรู้", "").trim();
+      const idx = DEPARTMENTS.findIndex(
+        (d) =>
+          d.includes(clean) ||
+          clean.includes(d.replace("กลุ่มสาระการเรียนรู้", "").trim())
+      );
+      return idx === -1 ? 999 : idx;
+    };
+
+    // Track first appearance/upload order of each teacher to preserve upload order per person
+    const teacherFirstOrder = new Map<string, number>();
+    list.forEach((item, idx) => {
+      const teacherKey = `${item.date}_${item.department}_${item.originalTeacherName || item.originalTeacherId}`;
+      if (!teacherFirstOrder.has(teacherKey)) {
+        teacherFirstOrder.set(teacherKey, idx);
+      }
+    });
+
+    return [...list].sort((a, b) => {
+      // 1. Date (newest date first)
+      if (a.date !== b.date) {
+        return b.date.localeCompare(a.date);
+      }
+
+      // 2. Department (Official Department Order)
+      const deptA = getDeptRank(a.department);
+      const deptB = getDeptRank(b.department);
+      if (deptA !== deptB) {
+        return deptA - deptB;
+      }
+
+      // 3. Person (Keep each teacher together in order of upload)
+      const teacherKeyA = `${a.date}_${a.department}_${a.originalTeacherName || a.originalTeacherId}`;
+      const teacherKeyB = `${b.date}_${b.department}_${b.originalTeacherName || b.originalTeacherId}`;
+      const orderA = teacherFirstOrder.get(teacherKeyA) ?? 0;
+      const orderB = teacherFirstOrder.get(teacherKeyB) ?? 0;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+
+      // 4. Period (within each individual teacher, sort by periodStart)
+      return a.periodStart - b.periodStart;
+    });
   }, [substitutes, subTimeFilter, subStartDate, subEndDate, subDeptFilter, subSearch]);
 
   // Filtered attendance records in Admin Backend
@@ -1893,7 +1937,7 @@ export default function AdminPage() {
                                 </div>
                               </td>
                               <td className="p-3 text-slate-600 text-[11px] max-w-[160px] truncate">
-                                {sub.note || "-"}
+                                {sub.note && !sub.note.startsWith("นำเข้าอัตโนมัติ") ? sub.note : "-"}
                               </td>
                               <td className="p-3 text-center whitespace-nowrap">
                                 <button

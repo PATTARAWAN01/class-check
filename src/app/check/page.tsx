@@ -1032,12 +1032,6 @@ export default function StudentCheckPage() {
                       {sub.substituteDepartment.replace("กลุ่มสาระการเรียนรู้", "")})
                     </span>
                   </div>
-
-                  {sub.note && (
-                    <div className="text-[11px] text-slate-500 italic bg-white p-2 rounded-lg border border-slate-200">
-                      💡 คำสั่ง/หมายเหตุ: {sub.note}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -1061,12 +1055,26 @@ export default function StudentCheckPage() {
           </h1>
         </div>
 
-        {/* Live Clock Card */}
-        <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 border border-white/20 flex items-center gap-3 self-start md:self-auto">
-          <Clock className="w-6 h-6 text-sky-300 animate-pulse" />
-          <div>
-            <div className="text-xs text-sky-200">เวลาปัจจุบัน</div>
-            <div className="text-lg font-mono font-bold">{currentTimeStr || "--:--:--"}</div>
+        {/* Current Date & Live Clock Cards */}
+        <div className="flex items-center gap-3 flex-wrap self-start md:self-auto">
+          <div className="bg-white/10 backdrop-blur-md rounded-xl px-3.5 py-2.5 border border-white/20 flex items-center gap-2.5">
+            <Calendar className="w-5 h-5 text-sky-300 shrink-0" />
+            <div>
+              <div className="text-[11px] text-sky-200 leading-tight">วันที่ปัจจุบัน</div>
+              <div className="text-sm sm:text-base font-bold text-white leading-snug">
+                {formatThaiDateLong(todayStr)}
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/10 backdrop-blur-md rounded-xl px-3.5 py-2.5 border border-white/20 flex items-center gap-2.5">
+            <Clock className="w-5 h-5 text-sky-300 animate-pulse shrink-0" />
+            <div>
+              <div className="text-[11px] text-sky-200 leading-tight">เวลาปัจจุบัน</div>
+              <div className="text-sm sm:text-base font-mono font-bold text-white leading-snug">
+                {currentTimeStr || "--:--:--"}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1239,15 +1247,6 @@ export default function StudentCheckPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => autoDetectPeriodAndTimetable(selectedRoomId)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors border border-sky-200"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-sky-600" />
-                <span>ตรวจจับตารางสอนอัตโนมัติ</span>
-              </button>
-
               <button
                 type="button"
                 onClick={handleLogout}
@@ -1608,11 +1607,6 @@ export default function StudentCheckPage() {
                             : "ไปราชการ"}
                         </span>
                         <span>) ➡️ ปฏิบัติหน้าที่สอนแทนโดย <strong>{currentSubstitute.substituteTeacherName}</strong></span>
-                        {currentSubstitute.note && (
-                          <div className="text-[11px] text-amber-700 mt-0.5 font-medium">
-                            คำสั่ง/หมายเหตุ: {currentSubstitute.note}
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}

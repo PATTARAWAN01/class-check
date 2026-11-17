@@ -373,7 +373,7 @@ export default function SubstituteOcrImporter({
           substituteTeacherId: it.substituteTeacherId,
           substituteTeacherName: it.substituteTeacherName,
           substituteDepartment: it.substituteDept || targetDept,
-          note: `นำเข้าอัตโนมัติจากไฟล์ PDF OCR: ${ocrData?.fileName || "รายงานสอนแทน"}`,
+          note: "",
           recordedByDept: authDept || "งานวิชาการ",
           createdAt: nowIso,
         };
