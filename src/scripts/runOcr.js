@@ -96,6 +96,47 @@ function matchSubject(subjectCode) {
   return masterSubjects.find((s) => s.code.replace(/\s+/g, '').toUpperCase() === clean) || null;
 }
 
+function cleanSubjectCode(rawCode, dept) {
+  if (!rawCode) return '';
+  let clean = rawCode.replace(/\s+/g, '').toUpperCase();
+  if (masterSubjects.some((s) => s.code.replace(/\s+/g, '').toUpperCase() === clean)) {
+    return clean;
+  }
+  if (/^[80Oo]\d{5}$/i.test(clean)) {
+    const candidate = 'อ' + clean.substring(1);
+    if (masterSubjects.some((s) => s.code.replace(/\s+/g, '').toUpperCase() === candidate)) {
+      return candidate;
+    }
+  }
+  if (/^[2]\d{5}$/.test(clean)) {
+    const candidate = 'ว' + clean.substring(1);
+    if (masterSubjects.some((s) => s.code.replace(/\s+/g, '').toUpperCase() === candidate)) {
+      return candidate;
+    }
+  }
+  if (/^\d{5}$/.test(clean)) {
+    const deptPrefixMap = {
+      'กลุ่มสาระการเรียนรู้ภาษาต่างประเทศ': 'อ',
+      'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี': 'ว',
+      'กลุ่มสาระการเรียนรู้คณิตศาสตร์': 'ค',
+      'กลุ่มสาระการเรียนรู้ภาษาไทย': 'ท',
+      'กลุ่มสาระการเรียนรู้สังคมศึกษา ศาสนา และวัฒนธรรม': 'ส',
+      'กลุ่มสาระการเรียนรู้สุขศึกษาและพลศึกษา': 'พ',
+      'กลุ่มสาระการเรียนรู้ศิลปะ': 'ศ',
+      'กลุ่มสาระการเรียนรู้การงานอาชีพ': 'ง',
+    };
+    const prefix = (dept && deptPrefixMap[dept]) || 'อ';
+    const candidate = prefix + clean;
+    if (masterSubjects.some((s) => s.code.replace(/\s+/g, '').toUpperCase() === candidate)) {
+      return candidate;
+    }
+  }
+  if (/^[80Oo]\d{5}$/i.test(clean) && dept && dept.includes('ภาษาต่างประเทศ')) {
+    return 'อ' + clean.substring(1);
+  }
+  return clean;
+}
+
 function parseThaiDate(text) {
   const m = text.match(
     /(?:วัน([^\s]+)\s+)?(\d{1,2})\s+(มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|พ\.ย\.|ธ\.ค\.|ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.)\s+(\d{2,4})/
@@ -186,8 +227,27 @@ async function processFile(filePath) {
 
     if (timeMatch && leaveMatch) {
       const subLine = line;
-      const mainLine = i > 0 ? lines[i - 1] : '';
+      let mainLine = '';
+      for (let k = 1; k <= 2; k++) {
+        if (i - k >= 0) {
+          const prev = lines[i - k];
+          if (
+            !prev.includes('รายงาน') &&
+            !prev.includes('โรงเรียน') &&
+            !prev.includes('สรุป') &&
+            !prev.includes('วันจันทร์') &&
+            !prev.includes('วันอังคาร') &&
+            !prev.includes('วันพุธ') &&
+            !prev.includes('วันพฤหัส') &&
+            !prev.includes('วันศุกร์')
+          ) {
+            mainLine = prev;
+            break;
+          }
+        }
+      }
 
+      const combinedText = `${mainLine} ${subLine}`;
       const timeRange = `${timeMatch[1]}-${timeMatch[2]}`;
       let period = 1;
       if (timeRange.startsWith('08')) period = 1;
@@ -196,39 +256,66 @@ async function processFile(filePath) {
       else if (timeRange.startsWith('11')) period = 4;
       else if (timeRange.startsWith('13.00') || timeRange.startsWith('13:00')) period = 5;
       else if (timeRange.startsWith('13.50') || timeRange.startsWith('13:50')) period = 6;
-      else if (timeRange.startsWith('14')) period = 7;
+      else if (timeRange.startsWith('14') || timeRange.startsWith('15')) period = 7;
 
       let leaveType = 'sick';
-      if (subLine.includes('ลากิจ')) leaveType = 'personal';
-      else if (subLine.includes('ไปราชการ')) leaveType = 'official';
+      if (combinedText.includes('ลากิจ')) leaveType = 'personal';
+      else if (combinedText.includes('ไปราชการ')) leaveType = 'official';
 
-      const roomMatch = subLine.match(/ม\.\s*([1-6])\s*[\/./]\s*([1-5])/);
+      const roomMatch = combinedText.match(/ม\.\s*([1-6])\s*[\/./]\s*([1-5])/);
       const gradeRoom = roomMatch ? `ม.${roomMatch[1]}/${roomMatch[2]}` : '';
       const matchedCls = matchClassroom(gradeRoom);
 
-      const locMatch = subLine.match(/ห้อง\s*(\d+)/);
+      const locMatch = combinedText.match(/ห้อง\s*(\d+)/);
       const roomLocation = locMatch ? `ห้อง ${locMatch[1]}` : '';
 
-      const subjMatch = mainLine.match(/([ก-ฮA-Za-z]\s*\d{5})/);
-      const subjectCode = subjMatch ? subjMatch[1].replace(/\s+/g, '') : '';
+      let rawSubject = '';
+      const subjMatch = combinedText.match(/([ก-ฮA-Za-z0-9]\s*\d{5})/);
+      if (subjMatch) {
+        rawSubject = subjMatch[1];
+      }
+      const subjectCode = cleanSubjectCode(rawSubject, department);
       const matchedSubj = matchSubject(subjectCode);
 
-      const isUnassigned =
-        mainLine.includes('ยังไม่มีผู้สอนแทน') || subLine.includes('ยังไม่มีผู้สอนแทน');
+      const isExplicitlyUnassigned =
+        combinedText.includes('ยังไม่มีผู้สอนแทน') || combinedText.includes('ไม่มีผู้สอนแทน');
 
-      let rawAbsentTeacher = '';
-      let rawSubstituteTeacher = '';
+      // Scan all known teachers in mainLine
+      const mainNorm = normalizeThai(mainLine);
+      const matchedTeachers = [];
+      for (const t of masterTeachers) {
+        const norm = normalizeThai(t.fullName);
+        const idx = mainNorm.indexOf(norm);
+        if (idx !== -1) {
+          matchedTeachers.push({ teacher: t, pos: idx });
+        }
+      }
+      matchedTeachers.sort((a, b) => a.pos - b.pos);
 
-      if (subjMatch) {
-        const parts = mainLine.split(subjMatch[0]);
-        rawAbsentTeacher = parts[0].replace(/^[\d\s]+/, '').replace(/[\[\]|/\\=]/g, '').trim();
-        if (!isUnassigned && parts.length > 1) {
-          rawSubstituteTeacher = parts[1].replace(/[\[\]|/\\=]/g, '').trim();
+      let absentTch = matchedTeachers[0] ? matchedTeachers[0].teacher : null;
+      let subTch = null;
+
+      if (!isExplicitlyUnassigned) {
+        if (matchedTeachers.length > 1) {
+          subTch = matchedTeachers[1].teacher;
+        } else if (subjMatch) {
+          const parts = mainLine.split(subjMatch[0]);
+          if (parts.length > 1) {
+            subTch = matchTeacher(parts[1]);
+          }
         }
       }
 
-      const absentTch = matchTeacher(rawAbsentTeacher);
-      const subTch = isUnassigned ? null : matchTeacher(rawSubstituteTeacher);
+      if (!absentTch) {
+        if (subjMatch) {
+          const parts = mainLine.split(subjMatch[0]);
+          absentTch = matchTeacher(parts[0]);
+        } else {
+          absentTch = matchTeacher(mainLine);
+        }
+      }
+
+      const isAssigned = Boolean(subTch && !isExplicitlyUnassigned);
 
       parsedItems.push({
         id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -244,19 +331,25 @@ async function processFile(filePath) {
         originalTeacherId: absentTch ? absentTch.id : '',
         originalTeacherName: absentTch
           ? `${absentTch.prefix}${absentTch.fullName}`
-          : rawAbsentTeacher,
+          : '',
         originalTeacherDept: absentTch ? absentTch.department : department,
         substituteTeacherId: subTch ? subTch.id : '',
-        substituteTeacherName: isUnassigned
+        substituteTeacherName: isExplicitlyUnassigned
           ? 'ยังไม่มีผู้สอนแทน'
           : subTch
           ? `${subTch.prefix}${subTch.fullName}`
-          : rawSubstituteTeacher,
+          : 'ยังไม่มีผู้สอนแทน',
+        substituteTeacherDept: subTch ? subTch.department : department,
         substituteDept: subTch ? subTch.department : department,
-        isAssigned: !isUnassigned && !!subTch,
-        selected: !isUnassigned, // Default selected if teacher is assigned
-        rawAbsentTeacher,
-        rawSubstituteTeacher: isUnassigned ? 'ยังไม่มีผู้สอนแทน' : rawSubstituteTeacher,
+        isAssigned,
+        selected: isAssigned,
+        rawAbsentTeacher: absentTch ? `${absentTch.prefix}${absentTch.fullName}` : '',
+        rawSubstituteTeacher: isExplicitlyUnassigned
+          ? 'ยังไม่มีผู้สอนแทน'
+          : subTch
+          ? `${subTch.prefix}${subTch.fullName}`
+          : 'ยังไม่มีผู้สอนแทน',
+        note: isExplicitlyUnassigned ? 'ยังไม่มีผู้สอนแทนในเอกสาร' : undefined,
       });
     }
   }

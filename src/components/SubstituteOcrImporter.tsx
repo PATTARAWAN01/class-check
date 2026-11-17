@@ -250,7 +250,13 @@ export default function SubstituteOcrImporter({
 
     const parsedDate = parseThaiDate(fullOcrText);
     const department = parseDepartment(fullOcrText);
-    const parsedItems = parseOcrTextToItems(fullOcrText, department);
+    const parsedItems = parseOcrTextToItems(
+      fullOcrText,
+      department,
+      teachers,
+      subjects,
+      classrooms
+    );
 
     const mappedItems: OcrParsedItem[] = parsedItems.map((p) => ({
       id: p.id,

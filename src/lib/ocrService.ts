@@ -19,6 +19,7 @@ export interface ParsedSubstituteItem {
   substituteTeacherId: string;
   substituteTeacherName: string;
   substituteTeacherDept: string;
+  isAssigned?: boolean;
   note?: string;
 }
 
@@ -129,6 +130,63 @@ export function matchSubject(
   );
 }
 
+// Clean and normalize subject codes from OCR (handles character misreads like 8 -> อ, 2 -> ว, 0 -> อ)
+export function cleanSubjectCode(
+  rawCode: string,
+  dept?: string,
+  subjectsList: Subject[] = SCHOOL_SUBJECTS
+): string {
+  if (!rawCode) return "";
+  let clean = rawCode.replace(/\s+/g, "").toUpperCase();
+
+  // If already exact match in subject database
+  if (subjectsList.some((s) => s.code.replace(/\s+/g, "").toUpperCase() === clean)) {
+    return clean;
+  }
+
+  // If OCR misread 'อ' as '8', '0', 'O', or 'o' before 5 digits (e.g. 831202 -> อ31202, 833222 -> อ33222, 821202 -> อ21202)
+  if (/^[80Oo]\d{5}$/i.test(clean)) {
+    const candidate = "อ" + clean.substring(1);
+    if (subjectsList.some((s) => s.code.replace(/\s+/g, "").toUpperCase() === candidate)) {
+      return candidate;
+    }
+  }
+
+  // If OCR misread 'ว' as '2' before 5 digits (e.g. 231102 -> ว31102)
+  if (/^[2]\d{5}$/.test(clean)) {
+    const candidate = "ว" + clean.substring(1);
+    if (subjectsList.some((s) => s.code.replace(/\s+/g, "").toUpperCase() === candidate)) {
+      return candidate;
+    }
+  }
+
+  // If 5 digits without prefix letter (e.g. 31202)
+  if (/^\d{5}$/.test(clean)) {
+    const deptPrefixMap: Record<string, string> = {
+      "กลุ่มสาระการเรียนรู้ภาษาต่างประเทศ": "อ",
+      "กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี": "ว",
+      "กลุ่มสาระการเรียนรู้คณิตศาสตร์": "ค",
+      "กลุ่มสาระการเรียนรู้ภาษาไทย": "ท",
+      "กลุ่มสาระการเรียนรู้สังคมศึกษา ศาสนา และวัฒนธรรม": "ส",
+      "กลุ่มสาระการเรียนรู้สุขศึกษาและพลศึกษา": "พ",
+      "กลุ่มสาระการเรียนรู้ศิลปะ": "ศ",
+      "กลุ่มสาระการเรียนรู้การงานอาชีพ": "ง",
+    };
+    const prefix = (dept && deptPrefixMap[dept]) || "อ";
+    const candidate = prefix + clean;
+    if (subjectsList.some((s) => s.code.replace(/\s+/g, "").toUpperCase() === candidate)) {
+      return candidate;
+    }
+  }
+
+  // Fallback for foreign language department starting with 8/0
+  if (/^[80Oo]\d{5}$/i.test(clean) && dept?.includes("ภาษาต่างประเทศ")) {
+    return "อ" + clean.substring(1);
+  }
+
+  return clean;
+}
+
 export function parseThaiDate(text: string): {
   isoDate: string;
   thaiDisplayDate: string;
@@ -206,7 +264,10 @@ export function parseDepartment(text: string): string {
 // Parse text lines to extract substitute assignments
 export function parseOcrTextToItems(
   fullOcrText: string,
-  department: string
+  department: string,
+  teachers: Teacher[] = SCHOOL_TEACHERS,
+  subjects: Subject[] = SCHOOL_SUBJECTS,
+  classrooms: Classroom[] = SCHOOL_CLASSROOMS
 ): ParsedSubstituteItem[] {
   const lines = fullOcrText
     .split("\n")
@@ -224,8 +285,27 @@ export function parseOcrTextToItems(
 
     if (timeMatch && leaveMatch) {
       const subLine = line;
-      const mainLine = i > 0 ? lines[i - 1] : "";
+      let mainLine = "";
+      for (let k = 1; k <= 2; k++) {
+        if (i - k >= 0) {
+          const prev = lines[i - k];
+          if (
+            !prev.includes("รายงาน") &&
+            !prev.includes("โรงเรียน") &&
+            !prev.includes("สรุป") &&
+            !prev.includes("วันจันทร์") &&
+            !prev.includes("วันอังคาร") &&
+            !prev.includes("วันพุธ") &&
+            !prev.includes("วันพฤหัส") &&
+            !prev.includes("วันศุกร์")
+          ) {
+            mainLine = prev;
+            break;
+          }
+        }
+      }
 
+      const combinedText = `${mainLine} ${subLine}`;
       const timeRange = `${timeMatch[1]}-${timeMatch[2]}`;
       let period = 1;
       if (timeRange.startsWith("08")) period = 1;
@@ -236,43 +316,70 @@ export function parseOcrTextToItems(
         period = 5;
       else if (timeRange.startsWith("13.50") || timeRange.startsWith("13:50"))
         period = 6;
-      else if (timeRange.startsWith("14")) period = 7;
+      else if (timeRange.startsWith("14") || timeRange.startsWith("15"))
+        period = 7;
 
       let leaveType: "sick" | "personal" | "official" = "sick";
-      if (subLine.includes("ลากิจ")) leaveType = "personal";
-      else if (subLine.includes("ไปราชการ")) leaveType = "official";
+      if (combinedText.includes("ลากิจ")) leaveType = "personal";
+      else if (combinedText.includes("ไปราชการ")) leaveType = "official";
 
-      const roomMatch = subLine.match(/ม\.\s*([1-6])\s*[\/./]\s*([1-5])/);
+      const roomMatch = combinedText.match(/ม\.\s*([1-6])\s*[\/./]\s*([1-5])/);
       const gradeRoom = roomMatch ? `ม.${roomMatch[1]}/${roomMatch[2]}` : "";
-      const matchedCls = matchClassroom(gradeRoom);
+      const matchedCls = matchClassroom(gradeRoom, classrooms);
 
-      const locMatch = subLine.match(/ห้อง\s*(\d+)/);
+      const locMatch = combinedText.match(/ห้อง\s*(\d+)/);
       const roomLocation = locMatch ? `ห้อง ${locMatch[1]}` : "";
 
-      const subjMatch = mainLine.match(/([ก-ฮA-Za-z]\s*\d{5})/);
-      const subjectCode = subjMatch ? subjMatch[1].replace(/\s+/g, "") : "";
-      const matchedSubj = matchSubject(subjectCode);
-
-      const isUnassigned =
-        mainLine.includes("ยังไม่มีผู้สอนแทน") ||
-        subLine.includes("ยังไม่มีผู้สอนแทน");
-
-      let rawAbsentTeacher = "";
-      let rawSubstituteTeacher = "";
-
+      // Match subject code with OCR correction (e.g. 831202 -> อ31202)
+      let rawSubject = "";
+      const subjMatch = combinedText.match(/([ก-ฮA-Za-z0-9]\s*\d{5})/);
       if (subjMatch) {
-        const parts = mainLine.split(subjMatch[0]);
-        rawAbsentTeacher = parts[0]
-          .replace(/^[\d\s]+/, "")
-          .replace(/[\[\]|/\\=]/g, "")
-          .trim();
-        if (!isUnassigned && parts.length > 1) {
-          rawSubstituteTeacher = parts[1].replace(/[\[\]|/\\=]/g, "").trim();
+        rawSubject = subjMatch[1];
+      }
+      const subjectCode = cleanSubjectCode(rawSubject, department, subjects);
+      const matchedSubj = matchSubject(subjectCode, subjects);
+
+      const isExplicitlyUnassigned =
+        combinedText.includes("ยังไม่มีผู้สอนแทน") ||
+        combinedText.includes("ไม่มีผู้สอนแทน");
+
+      // Scan all known teachers in mainLine and combinedText
+      const mainNorm = normalizeThai(mainLine);
+      const matchedTeachers: { teacher: Teacher; pos: number }[] = [];
+      for (const t of teachers) {
+        const norm = normalizeThai(t.fullName);
+        const idx = mainNorm.indexOf(norm);
+        if (idx !== -1) {
+          matchedTeachers.push({ teacher: t, pos: idx });
+        }
+      }
+      matchedTeachers.sort((a, b) => a.pos - b.pos);
+
+      let absentTch = matchedTeachers[0] ? matchedTeachers[0].teacher : null;
+      let subTch: Teacher | null = null;
+
+      if (!isExplicitlyUnassigned) {
+        if (matchedTeachers.length > 1) {
+          subTch = matchedTeachers[1].teacher;
+        } else if (subjMatch) {
+          const parts = mainLine.split(subjMatch[0]);
+          if (parts.length > 1) {
+            subTch = matchTeacher(parts[1], teachers);
+          }
         }
       }
 
-      const absentTch = matchTeacher(rawAbsentTeacher);
-      const subTch = isUnassigned ? null : matchTeacher(rawSubstituteTeacher);
+      // If absentTch was not found in mainLine, search subLine or matchTeacher on parts[0]
+      if (!absentTch) {
+        if (subjMatch) {
+          const parts = mainLine.split(subjMatch[0]);
+          absentTch = matchTeacher(parts[0], teachers);
+        } else {
+          absentTch = matchTeacher(mainLine, teachers);
+        }
+      }
+
+      const isAssigned = Boolean(subTch && !isExplicitlyUnassigned);
 
       parsedItems.push({
         id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -288,16 +395,17 @@ export function parseOcrTextToItems(
         originalTeacherId: absentTch ? absentTch.id : "",
         originalTeacherName: absentTch
           ? `${absentTch.prefix}${absentTch.fullName}`
-          : rawAbsentTeacher,
+          : "",
         originalTeacherDept: absentTch ? absentTch.department : department,
         substituteTeacherId: subTch ? subTch.id : "",
-        substituteTeacherName: isUnassigned
+        substituteTeacherName: isExplicitlyUnassigned
           ? "ยังไม่มีผู้สอนแทน"
           : subTch
           ? `${subTch.prefix}${subTch.fullName}`
-          : rawSubstituteTeacher || "ยังไม่มีผู้สอนแทน",
+          : "ยังไม่มีผู้สอนแทน",
         substituteTeacherDept: subTch ? subTch.department : department,
-        note: isUnassigned ? "ยังไม่มีผู้สอนแทนในเอกสาร" : undefined,
+        isAssigned,
+        note: isExplicitlyUnassigned ? "ยังไม่มีผู้สอนแทนในเอกสาร" : undefined,
       });
     }
   }
@@ -306,7 +414,12 @@ export function parseOcrTextToItems(
 }
 
 // Process OCR from a Buffer directly in Next.js Serverless runtime
-export async function processOcrBuffer(fileBuf: Buffer): Promise<OcrResult> {
+export async function processOcrBuffer(
+  fileBuf: Buffer,
+  teachers: Teacher[] = SCHOOL_TEACHERS,
+  subjects: Subject[] = SCHOOL_SUBJECTS,
+  classrooms: Classroom[] = SCHOOL_CLASSROOMS
+): Promise<OcrResult> {
   const images = extractJpegFromPdf(fileBuf);
   if (images.length === 0) {
     throw new Error("ไม่สามารถแยกรูปภาพออกจากไฟล์ PDF หรือไฟล์รูปภาพนี้ได้");
@@ -330,7 +443,7 @@ export async function processOcrBuffer(fileBuf: Buffer): Promise<OcrResult> {
   const thaiDisplayDate = parsedDate ? parsedDate.thaiDisplayDate : "วันที่ระบุในเอกสาร";
   const dayOfWeek = parsedDate ? parsedDate.dayOfWeek : 1;
 
-  const items = parseOcrTextToItems(fullOcrText, department);
+  const items = parseOcrTextToItems(fullOcrText, department, teachers, subjects, classrooms);
 
   return {
     success: true,
