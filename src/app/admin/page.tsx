@@ -92,6 +92,7 @@ import {
   SubstituteLeaveType,
 } from "@/types";
 import { DEPARTMENTS, THAI_DAYS } from "@/lib/constants";
+import { INITIAL_SUBJECTS } from "@/lib/initialData";
 import OfficialPdfReport from "@/components/OfficialPdfReport";
 import ClassroomQrPrint from "@/components/ClassroomQrPrint";
 import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
@@ -505,6 +506,25 @@ export default function AdminPage() {
     };
   }, [filteredAdminSubstitutes]);
 
+  // Detect subjects with duplicate names across different codes
+  const duplicateSubjectGroups = useMemo(() => {
+    const map = new Map<string, Subject[]>();
+    subjects.forEach((s) => {
+      const norm = (s.name || "").trim().toLowerCase();
+      if (!norm) return;
+      if (!map.has(norm)) map.set(norm, []);
+      map.get(norm)!.push(s);
+    });
+
+    const dupes: Array<{ name: string; items: Subject[] }> = [];
+    map.forEach((items, name) => {
+      if (items.length > 1) {
+        dupes.push({ name: items[0].name, items });
+      }
+    });
+    return dupes;
+  }, [subjects]);
+
   // Sorted teachers by official DEPARTMENTS hierarchy, then alphabetically by name
   const sortedTeachersByDept = useMemo(() => {
     const getDeptRank = (deptStr: string) => {
@@ -858,12 +878,34 @@ export default function AdminPage() {
 
   const handleAddSubject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSubject.code.trim() || !newSubject.name.trim()) return;
+    const cleanCode = newSubject.code.trim();
+    const cleanName = newSubject.name.trim();
+    if (!cleanCode || !cleanName) return;
+
+    // 1. Primary Key: Code uniqueness validation
+    const existingCode = subjects.find(
+      (s) => s.code.replace(/\s+/g, "").toUpperCase() === cleanCode.replace(/\s+/g, "").toUpperCase()
+    );
+    if (existingCode) {
+      alert(`รหัสวิชา "${cleanCode}" มีอยู่ในระบบแล้ว (${existingCode.name}) รหัสวิชาเป็นคีย์หลักห้ามซ้ำกันเด็ดขาด`);
+      return;
+    }
+
+    // 2. Duplicate Name Warning
+    const dupNameSubj = subjects.find(
+      (s) => s.name.trim().toLowerCase() === cleanName.toLowerCase()
+    );
+    if (dupNameSubj) {
+      const proceed = confirm(
+        `⚠️ ชื่อวิชา "${cleanName}" ซ้ำกับวิชารหัส "${dupNameSubj.code}" (${dupNameSubj.department})\n\nแนะนำให้ระบุระดับชั้นต่อท้าย เช่น "${cleanName} (ม.4)" เพื่อป้องกันระบบดึงข้อมูลสับสน\n\nต้องการบันทึกด้วยชื่อนี้หรือไม่?`
+      );
+      if (!proceed) return;
+    }
 
     const added: Subject = {
-      id: `subj_${Date.now()}`,
-      code: newSubject.code.trim(),
-      name: newSubject.name.trim(),
+      id: `subj_${cleanCode.replace(/[^a-zA-Z0-9ก-ฮ]/g, "_")}_${Date.now()}`,
+      code: cleanCode,
+      name: cleanName,
       department: newSubject.department,
       assignedClassroomIds: newSubject.assignedClassroomIds,
     };
@@ -879,11 +921,46 @@ export default function AdminPage() {
     e.preventDefault();
     if (!editingSubject || !editingSubject.code.trim() || !editingSubject.name.trim()) return;
 
-    const updated = subjects.map((s) => (s.id === editingSubject.id ? editingSubject : s));
+    const cleanCode = editingSubject.code.trim();
+    const cleanName = editingSubject.name.trim();
+
+    // 1. Primary Key: Code uniqueness check (excluding self)
+    const existingCode = subjects.find(
+      (s) => s.id !== editingSubject.id && s.code.replace(/\s+/g, "").toUpperCase() === cleanCode.replace(/\s+/g, "").toUpperCase()
+    );
+    if (existingCode) {
+      alert(`รหัสวิชา "${cleanCode}" มีอยู่ในระบบแล้ว (${existingCode.name}) รหัสวิชาเป็นคีย์หลักห้ามซ้ำกัน`);
+      return;
+    }
+
+    // 2. Duplicate Name Warning
+    const dupNameSubj = subjects.find(
+      (s) => s.id !== editingSubject.id && s.name.trim().toLowerCase() === cleanName.toLowerCase()
+    );
+    if (dupNameSubj) {
+      const proceed = confirm(
+        `⚠️ ชื่อวิชา "${cleanName}" ซ้ำกับวิชารหัส "${dupNameSubj.code}" (${dupNameSubj.department})\n\nแนะนำให้ระบุระดับชั้นต่อท้าย เช่น "${cleanName} (ม.4)" เพื่อป้องกันระบบดึงข้อมูลสับสน\n\nต้องการบันทึกด้วยชื่อนี้หรือไม่?`
+      );
+      if (!proceed) return;
+    }
+
+    const updated = subjects.map((s) => (s.id === editingSubject.id ? { ...editingSubject, code: cleanCode, name: cleanName } : s));
     await saveSubjects(updated);
     setSubjects(updated);
     showNotice(`แก้ไขข้อมูลวิชา ${editingSubject.code} ${editingSubject.name} สำเร็จ`);
     setEditingSubject(null);
+  };
+
+  const handleSyncAllStandardSubjects = async () => {
+    if (!confirm(`คุณต้องการซิงก์ข้อมูลรายวิชามาตรฐานทั้ง 134 รายวิชาขึ้น Firebase Firestore หรือไม่? (จะอัปเดตและเติมเต็มรายวิชามาตรฐานที่ขาดหายไป)`)) return;
+    try {
+      await saveSubjects(INITIAL_SUBJECTS);
+      const updated = await getSubjects();
+      setSubjects(updated);
+      showNotice(`ซิงก์รายวิชามาตรฐาน ${updated.length} วิชาขึ้น Firebase สำเร็จเรียบร้อยแล้ว`, "success");
+    } catch (e: any) {
+      showNotice("เกิดข้อผิดพลาดในการซิงก์รายวิชา: " + e.message, "error");
+    }
   };
 
   const handleSubjectExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2697,6 +2774,15 @@ export default function AdminPage() {
 
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
+                  type="button"
+                  onClick={handleSyncAllStandardSubjects}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>ซิงก์ 134 รายวิชามาตรฐาน</span>
+                </button>
+
+                <button
                   onClick={downloadSubjectTemplate}
                   className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-200"
                 >
@@ -2716,6 +2802,64 @@ export default function AdminPage() {
                 </label>
               </div>
             </div>
+
+            {/* Duplicate Subject Names Warning Banner */}
+            {duplicateSubjectGroups.length > 0 && (
+              <div className="bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3 mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                    <div>
+                      <h3 className="text-sm font-bold text-amber-900">
+                        ระบบตรวจสอบพบรายวิชาที่ใช้ชื่อซ้ำกัน ({duplicateSubjectGroups.length} กลุ่มวิชา)
+                      </h3>
+                      <p className="text-xs text-amber-700 mt-0.5">
+                        ระบบใช้ <strong>&ldquo;รหัสวิชา&rdquo;</strong> เป็นคีย์หลักในการดึงข้อมูล แต่แนะนำให้ระบุระดับชั้นต่อท้ายชื่อวิชา เช่น เติม (ม.4), (ม.5) เพื่อความชัดเจนและป้องกันความสับสน
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-2 border-t border-amber-200">
+                  {duplicateSubjectGroups.map((group) => (
+                    <div
+                      key={group.name}
+                      className="bg-white p-3 rounded-xl border border-amber-200 flex flex-col justify-between gap-2 shadow-xs"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-slate-800 flex items-center justify-between gap-1.5">
+                          <span className="truncate max-w-[200px]">วิชา &ldquo;{group.name}&rdquo;</span>
+                          <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full shrink-0">
+                            ซ้ำ {group.items.length} รหัส
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {group.items.map((s) => (
+                            <div
+                              key={s.id}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-mono"
+                            >
+                              <span className="font-bold text-indigo-700">{s.code}</span>
+                              <span className="text-slate-500 font-sans text-[11px]">
+                                ({s.assignedClassroomIds?.length ? s.assignedClassroomIds.map(cid => cid.replace('m', 'ม.').replace('_', '/')).join(', ') : 'ไม่ระบุห้อง'})
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setEditingSubject(s)}
+                                className="p-1 hover:bg-slate-200 rounded text-slate-500 hover:text-indigo-600 transition-colors"
+                                title="คลิกเพื่อแก้ไขชื่อวิชานี้ (เช่น เติมระดับชั้น)"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Quick Add Subject with Classroom Assignment */}
             <form onSubmit={handleAddSubject} className="bg-slate-50 p-4 sm:p-5 rounded-xl mb-6 border border-slate-200/80 space-y-4">

@@ -290,10 +290,10 @@ export async function getSubjects(): Promise<Subject[]> {
   if (db) {
     try {
       const snapshot = await getDocs(collection(db, "subjects"));
-      if (!snapshot.empty && snapshot.size >= 20) {
+      if (!snapshot.empty && snapshot.size >= 100) {
         return snapshot.docs.map((d) => d.data() as Subject);
       }
-      // If Firestore has fewer than 20 subjects, auto-seed INITIAL_SUBJECTS
+      // If Firestore has fewer than 100 subjects, auto-seed INITIAL_SUBJECTS
       try {
         const batch = writeBatch(db);
         INITIAL_SUBJECTS.forEach((s) => batch.set(doc(db!, "subjects", s.id), s));
@@ -307,7 +307,7 @@ export async function getSubjects(): Promise<Subject[]> {
     }
   }
   const local = getLocal<Subject[]>(STORAGE_KEYS.SUBJECTS, INITIAL_SUBJECTS);
-  if (!local || local.length < 20) {
+  if (!local || local.length < 100) {
     setLocal(STORAGE_KEYS.SUBJECTS, INITIAL_SUBJECTS);
     return INITIAL_SUBJECTS;
   }
