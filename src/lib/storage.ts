@@ -510,7 +510,11 @@ export async function updateAttendanceLog(record: AttendanceRecord): Promise<voi
   if (db) {
     try {
       const cleanRecord = cleanForFirestore(record);
-      await setDoc(doc(db, "attendance_logs", record.id), cleanRecord, { merge: true });
+      if (record.status !== "absent") {
+        cleanRecord.absenceReason = "";
+        cleanRecord.absenceNote = "";
+      }
+      await setDoc(doc(db, "attendance_logs", record.id), cleanRecord);
     } catch (e) {
       console.error("Firestore updateAttendanceLog error:", e);
     }
@@ -518,7 +522,11 @@ export async function updateAttendanceLog(record: AttendanceRecord): Promise<voi
   const all = getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
   const idx = all.findIndex((a) => a.id === record.id);
   if (idx >= 0) {
-    all[idx] = record;
+    all[idx] = {
+      ...record,
+      absenceReason: record.status === "absent" ? record.absenceReason : undefined,
+      absenceNote: record.status === "absent" ? record.absenceNote : "",
+    };
   } else {
     all.unshift(record);
   }

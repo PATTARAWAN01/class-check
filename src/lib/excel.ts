@@ -223,3 +223,31 @@ export function exportAttendanceToExcel(
   XLSX.utils.book_append_sheet(workbook, worksheet, "ข้อมูลการเข้าสอน");
   XLSX.writeFile(workbook, `รายงานการเข้าสอนครู_${schoolName}_${termLabel}.xlsx`);
 }
+
+// ==================== 5. EXPORT SUBSTITUTE STATS TO EXCEL ====================
+
+export function exportSubstituteStatsToExcel(
+  stats: Array<{
+    teacherName: string;
+    department: string;
+    totalPeriods: number;
+    replacedTeachers: string[];
+    rooms: string[];
+  }>,
+  schoolName: string,
+  timeRangeLabel: string
+) {
+  const data = stats.map((s, idx) => ({
+    "ลำดับ": idx + 1,
+    "ชื่อ-สกุล ครูผู้สอนแทน": s.teacherName,
+    "กลุ่มสาระการเรียนรู้": s.department,
+    "จำนวนคาบที่เข้าสอนแทน": s.totalPeriods,
+    "ปฏิบัติหน้าที่แทนครู": s.replacedTeachers.join(", "),
+    "ห้องเรียนที่สอนแทน": s.rooms.join(", "),
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "สถิติครูผู้สอนแทน");
+  XLSX.writeFile(workbook, `สถิติครูผู้เข้าสอนแทน_${schoolName}_${timeRangeLabel}.xlsx`);
+}

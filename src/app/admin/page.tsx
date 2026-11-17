@@ -77,6 +77,7 @@ import {
   downloadTimetableTemplate,
   parseTimetableExcel,
   exportAttendanceToExcel,
+  exportSubstituteStatsToExcel,
 } from "@/lib/excel";
 import {
   AcademicTerm,
@@ -179,6 +180,7 @@ export default function AdminPage() {
   const [subEndDate, setSubEndDate] = useState(() => getThaiDateString());
   const [subSearch, setSubSearch] = useState("");
   const [subDeptFilter, setSubDeptFilter] = useState("all");
+  const [subHistoryView, setSubHistoryView] = useState<"teachers" | "schedule">("teachers");
 
   // Check cached login
   useEffect(() => {
@@ -502,6 +504,128 @@ export default function AdminPage() {
       officialCount,
     };
   }, [filteredAdminSubstitutes]);
+
+  // Sorted teachers by official DEPARTMENTS hierarchy, then alphabetically by name
+  const sortedTeachersByDept = useMemo(() => {
+    const getDeptRank = (deptStr: string) => {
+      const clean = (deptStr || "").replace("กลุ่มสาระการเรียนรู้", "").trim();
+      const idx = DEPARTMENTS.findIndex(
+        (d) => d.includes(clean) || clean.includes(d.replace("กลุ่มสาระการเรียนรู้", "").trim())
+      );
+      return idx === -1 ? 999 : idx;
+    };
+    return [...teachers].sort((a, b) => {
+      const rankA = getDeptRank(a.department);
+      const rankB = getDeptRank(b.department);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.fullName.localeCompare(b.fullName, "th");
+    });
+  }, [teachers]);
+
+  // Statistics of teachers who substituted (based on current filters: time, dept, search)
+  const substituteTeacherStats = useMemo(() => {
+    const teacherMap = new Map<
+      string,
+      {
+        teacherId: string;
+        teacherName: string;
+        department: string;
+        totalPeriods: number;
+        replacedTeachers: Set<string>;
+        rooms: Set<string>;
+        dates: Set<string>;
+      }
+    >();
+
+    filteredAdminSubstitutes.forEach((sub) => {
+      const key = sub.substituteTeacherName || sub.substituteTeacherId || "ไม่ระบุ";
+      let entry = teacherMap.get(key);
+      if (!entry) {
+        const foundTch = teachers.find(
+          (t) =>
+            t.id === sub.substituteTeacherId ||
+            `${t.prefix}${t.fullName}` === sub.substituteTeacherName ||
+            t.fullName === sub.substituteTeacherName
+        );
+        const dept = sub.substituteDepartment || foundTch?.department || sub.department || "ไม่ระบุ";
+
+        entry = {
+          teacherId: sub.substituteTeacherId,
+          teacherName: sub.substituteTeacherName,
+          department: dept,
+          totalPeriods: 0,
+          replacedTeachers: new Set<string>(),
+          rooms: new Set<string>(),
+          dates: new Set<string>(),
+        };
+        teacherMap.set(key, entry);
+      }
+
+      const periodsCount =
+        sub.periodEnd && sub.periodEnd > sub.periodStart
+          ? sub.periodEnd - sub.periodStart + 1
+          : 1;
+
+      entry.totalPeriods += periodsCount;
+      if (sub.originalTeacherName) {
+        entry.replacedTeachers.add(sub.originalTeacherName);
+      }
+      if (sub.gradeRoom) {
+        entry.rooms.add(sub.gradeRoom);
+      }
+      if (sub.date) {
+        entry.dates.add(sub.date);
+      }
+    });
+
+    const getDeptRank = (deptStr: string) => {
+      const clean = (deptStr || "").replace("กลุ่มสาระการเรียนรู้", "").trim();
+      const idx = DEPARTMENTS.findIndex(
+        (d) => d.includes(clean) || clean.includes(d.replace("กลุ่มสาระการเรียนรู้", "").trim())
+      );
+      return idx === -1 ? 999 : idx;
+    };
+
+    return Array.from(teacherMap.values())
+      .map((item) => ({
+        ...item,
+        replacedTeachers: Array.from(item.replacedTeachers),
+        rooms: Array.from(item.rooms),
+        dates: Array.from(item.dates),
+      }))
+      .sort((a, b) => {
+        if (b.totalPeriods !== a.totalPeriods) {
+          return b.totalPeriods - a.totalPeriods;
+        }
+        const rankA = getDeptRank(a.department);
+        const rankB = getDeptRank(b.department);
+        if (rankA !== rankB) return rankA - rankB;
+        return a.teacherName.localeCompare(b.teacherName, "th");
+      });
+  }, [filteredAdminSubstitutes, teachers]);
+
+  const handleExportSubstituteStats = () => {
+    if (substituteTeacherStats.length === 0) {
+      alert("ไม่มีข้อมูลสถิติครูสอนแทนในช่วงเวลาที่เลือก");
+      return;
+    }
+    const timeLabel =
+      subTimeFilter === "today"
+        ? `ประจำวันนี้_${getThaiDateString()}`
+        : subTimeFilter === "week"
+        ? "ย้อนหลัง_7_วัน"
+        : subTimeFilter === "month"
+        ? "ประจำเดือนนี้"
+        : subTimeFilter === "custom"
+        ? `ช่วงวันที่_${subStartDate}_ถึง_${subEndDate}`
+        : "ทั้งหมด";
+
+    exportSubstituteStatsToExcel(
+      substituteTeacherStats,
+      schoolProfile.schoolName || "โรงเรียน",
+      timeLabel
+    );
+  };
 
   const handleDeleteSubstitute = async (id: string) => {
     if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการยกเลิก/ลบรายการจัดสอนแทนนี้?")) return;
@@ -1126,11 +1250,44 @@ export default function AdminPage() {
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white font-medium"
                 >
                   <option value="all">-- สรุปภาพรวมครูทุกคน ({teachers.length} ท่าน) --</option>
-                  {teachers.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.prefix}{t.fullName} ({t.department.replace("กลุ่มสาระการเรียนรู้", "")})
-                    </option>
-                  ))}
+                  {DEPARTMENTS.map((dept) => {
+                    const deptTeachers = sortedTeachersByDept.filter(
+                      (t) =>
+                        t.department === dept ||
+                        t.department.replace("กลุ่มสาระการเรียนรู้", "").trim() ===
+                          dept.replace("กลุ่มสาระการเรียนรู้", "").trim()
+                    );
+                    if (deptTeachers.length === 0) return null;
+                    return (
+                      <optgroup key={dept} label={`📂 ${dept}`}>
+                        {deptTeachers.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.prefix}{t.fullName}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                  {(() => {
+                    const otherTeachers = sortedTeachersByDept.filter((t) => {
+                      const cleanT = (t.department || "").replace("กลุ่มสาระการเรียนรู้", "").trim();
+                      return !DEPARTMENTS.some(
+                        (d) =>
+                          d.includes(cleanT) ||
+                          cleanT.includes(d.replace("กลุ่มสาระการเรียนรู้", "").trim())
+                      );
+                    });
+                    if (otherTeachers.length === 0) return null;
+                    return (
+                      <optgroup label="📂 อื่นๆ / ไม่ระบุกลุ่มสาระ">
+                        {otherTeachers.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.prefix}{t.fullName} ({t.department || "ไม่ระบุ"})
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })()}
                 </select>
               </div>
 
@@ -1851,7 +2008,47 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                {/* Substitute History Table */}
+                {/* Sub-view toggle & Excel export button */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setSubHistoryView("teachers")}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        subHistoryView === "teachers"
+                          ? "bg-white text-indigo-700 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      สถิติครูผู้เข้าสอนแทน ({substituteTeacherStats.length} ท่าน)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSubHistoryView("schedule")}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        subHistoryView === "schedule"
+                          ? "bg-white text-indigo-700 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      รายการจัดสอนแทนรายคาบ ({filteredAdminSubstitutes.length} รายการ)
+                    </button>
+                  </div>
+
+                  {subHistoryView === "teachers" && (
+                    <button
+                      type="button"
+                      onClick={handleExportSubstituteStats}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors"
+                    >
+                      <FileSpreadsheet className="w-4 h-4" />
+                      ส่งออกสถิติสอนแทน (Excel)
+                    </button>
+                  )}
+                </div>
+
                 {filteredAdminSubstitutes.length === 0 ? (
                   <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
                     <Sparkles className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -1862,7 +2059,71 @@ export default function AdminPage() {
                       คุณสามารถนำเข้ารายงานประจำวันจากไฟล์ PDF โดยกดที่แท็บ &ldquo;นำเข้ารายงาน (PDF OCR)&rdquo; ด้านบน
                     </p>
                   </div>
+                ) : subHistoryView === "teachers" ? (
+                  /* Teachers Substitution Statistics Table */
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
+                          <th className="p-3 w-10 text-center">#</th>
+                          <th className="p-3 whitespace-nowrap">ครูผู้เข้าสอนแทน</th>
+                          <th className="p-3 whitespace-nowrap">กลุ่มสาระการเรียนรู้</th>
+                          <th className="p-3 whitespace-nowrap text-center">จำนวนคาบสอนแทน</th>
+                          <th className="p-3 whitespace-nowrap">ปฏิบัติหน้าที่แทนครู</th>
+                          <th className="p-3 whitespace-nowrap">ห้องเรียนที่สอนแทน</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 bg-white">
+                        {substituteTeacherStats.map((stat, idx) => (
+                          <tr key={stat.teacherId || stat.teacherName} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="p-3 text-center text-slate-400 font-mono">{idx + 1}</td>
+                            <td className="p-3 whitespace-nowrap">
+                              <div className="font-bold text-indigo-900 flex items-center gap-1.5">
+                                <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                                <span className="text-sm">{stat.teacherName}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-slate-600">
+                              <span className="inline-flex px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700">
+                                {stat.department.replace("กลุ่มสาระการเรียนรู้", "")}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center whitespace-nowrap">
+                              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                {stat.totalPeriods} คาบ
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-700">
+                              <div className="flex flex-wrap gap-1 max-w-[280px]">
+                                {stat.replacedTeachers.map((tch, i) => (
+                                  <span
+                                    key={i}
+                                    className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-amber-50 text-amber-800 border border-amber-200 font-medium"
+                                  >
+                                    {tch}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                {stat.rooms.map((room, i) => (
+                                  <span
+                                    key={i}
+                                    className="inline-flex px-1.5 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200"
+                                  >
+                                    {room}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
+                  /* Individual Substitution Periods Table */
                   <div className="overflow-x-auto rounded-xl border border-slate-200">
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>

@@ -1089,7 +1089,7 @@ export default function StatisticsPage() {
                             บันทึกโดย: {r.recordedByStudent} &bull; เวลา {new Date(r.createdAt).toLocaleTimeString("th-TH")}
                           </div>
 
-                          {r.absenceNote && (
+                          {r.status === "absent" && r.absenceNote && (
                             <div className="text-xs text-rose-600 mt-1 bg-rose-50 p-1.5 rounded-lg border border-rose-100">
                               หมายเหตุ: {r.absenceNote}
                             </div>
