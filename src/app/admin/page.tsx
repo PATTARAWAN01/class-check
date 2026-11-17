@@ -1307,7 +1307,7 @@ export default function AdminPage() {
   // ==================== AUTHENTICATED ADMIN DASHBOARD ====================
   return (
     <>
-      <div className={`space-y-6 ${pdfModalOpen || showQrModal ? "no-print" : ""}`}>
+      <div className={`space-y-6 ${pdfModalOpen || showQrModal || showPinPrintModal ? "no-print" : ""}`}>
       {/* Admin Top Header */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import {
   Lock,
   CheckCircle2,
@@ -1124,6 +1125,15 @@ export default function StudentCheckPage() {
               </div>
             </div>
           </div>
+
+          <Link
+            href="/guide"
+            className="bg-white/15 hover:bg-white/25 active:bg-white/30 text-white rounded-xl px-3.5 py-2.5 border border-white/25 flex items-center gap-1.5 text-xs font-bold transition-all backdrop-blur-md shadow-xs"
+            title="เปิดดูคู่มือขั้นตอนการบันทึกเวลาเข้าสอน"
+          >
+            <BookOpen className="w-4 h-4 text-amber-300" />
+            <span>คู่มือวิธีใช้งาน</span>
+          </Link>
         </div>
       </div>
 
@@ -1137,6 +1147,12 @@ export default function StudentCheckPage() {
             <h2 className="text-xl font-bold text-slate-800">
               เข้าสู่ระบบประจำห้องเรียน
             </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              สำหรับหัวหน้าห้องหรือตัวแทนห้องบันทึกเวลาเรียน &bull;{" "}
+              <Link href="/guide" className="text-sky-600 font-bold hover:underline inline-flex items-center gap-0.5">
+                <BookOpen className="w-3 h-3 inline" /> ดูวิธีใช้งาน
+              </Link>
+            </p>
           </div>
 
           <form onSubmit={handleRoomLogin} className="space-y-4">
