@@ -99,6 +99,7 @@ import {
 import { DEPARTMENTS, THAI_DAYS } from "@/lib/constants";
 import { INITIAL_SUBJECTS } from "@/lib/initialData";
 import OfficialPdfReport from "@/components/OfficialPdfReport";
+import OfficialSubstitutePdfReport from "@/components/OfficialSubstitutePdfReport";
 import ClassroomQrPrint from "@/components/ClassroomQrPrint";
 import ClassroomPinPrintModal from "@/components/ClassroomPinPrintModal";
 import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
@@ -167,6 +168,7 @@ export default function AdminPage() {
   const [classroomGradeFilter, setClassroomGradeFilter] = useState<string>("all");
   const [showQrModal, setShowQrModal] = useState(false);
   const [showPinPrintModal, setShowPinPrintModal] = useState(false);
+  const [showSubPdfModal, setShowSubPdfModal] = useState(false);
   const [gradeDraftPins, setGradeDraftPins] = useState<Record<string, string>>({});
   const [gradeSaving, setGradeSaving] = useState<Record<string, boolean>>({});
   const [copiedGrade, setCopiedGrade] = useState<string | null>(null);
@@ -1307,7 +1309,7 @@ export default function AdminPage() {
   // ==================== AUTHENTICATED ADMIN DASHBOARD ====================
   return (
     <>
-      <div className={`space-y-6 ${pdfModalOpen || showQrModal || showPinPrintModal ? "no-print" : ""}`}>
+      <div className={`space-y-6 ${pdfModalOpen || showQrModal || showPinPrintModal || showSubPdfModal ? "no-print" : ""}`}>
       {/* Admin Top Header */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -1560,6 +1562,14 @@ export default function AdminPage() {
               >
                 <QrCode className="w-4 h-4" />
                 <span>พิมพ์แผ่น QR Code ประจำห้อง (27 ห้อง)</span>
+              </button>
+
+              <button
+                onClick={() => setShowSubPdfModal(true)}
+                className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md transition-all flex items-center gap-2"
+              >
+                <Printer className="w-4 h-4" />
+                <span>พิมพ์รายงานสถิติสอนแทนทางการ (PDF)</span>
               </button>
             </div>
           </div>
@@ -2224,16 +2234,27 @@ export default function AdminPage() {
                     </button>
                   </div>
 
-                  {subHistoryView === "teachers" && (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={handleExportSubstituteStats}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors"
+                      onClick={() => setShowSubPdfModal(true)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors"
                     >
-                      <FileSpreadsheet className="w-4 h-4" />
-                      ส่งออกสถิติสอนแทน (Excel)
+                      <Printer className="w-4 h-4" />
+                      พิมพ์รายงานทางการ (PDF)
                     </button>
-                  )}
+
+                    {subHistoryView === "teachers" && (
+                      <button
+                        type="button"
+                        onClick={handleExportSubstituteStats}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors"
+                      >
+                        <FileSpreadsheet className="w-4 h-4" />
+                        ส่งออกสถิติสอนแทน (Excel)
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {filteredAdminSubstitutes.length === 0 ? (
@@ -4020,6 +4041,39 @@ export default function AdminPage() {
           })()
         }
       />
+
+      {/* ========================================================== */}
+      {/* OFFICIAL SUBSTITUTE PDF REPORT MODAL PREVIEW */}
+      {/* ========================================================== */}
+      {showSubPdfModal && (
+        <OfficialSubstitutePdfReport
+          schoolProfile={schoolProfile}
+          term={
+            terms.find((t) => t.id === pdfTermId) ||
+            terms.find((t) => t.isActive) ||
+            terms[0] ||
+            null
+          }
+          substitutes={
+            filteredAdminSubstitutes.length > 0
+              ? filteredAdminSubstitutes
+              : substitutes
+          }
+          teachers={teachers}
+          dateRangeLabel={
+            subTimeFilter === "today"
+              ? `วันนี้ (${formatThaiDateLong(getThaiDateString())})`
+              : subTimeFilter === "week"
+              ? "7 วันล่าสุด"
+              : subTimeFilter === "month"
+              ? "ประจำเดือนนี้"
+              : subTimeFilter === "all"
+              ? "ทั้งหมด (ภาคเรียนปัจจุบัน)"
+              : `${formatThaiDateLong(subStartDate)} ถึง ${formatThaiDateLong(subEndDate)}`
+          }
+          onClose={() => setShowSubPdfModal(false)}
+        />
+      )}
 
       {/* ========================================================== */}
       {/* SCHOOL TIMETABLE IMPORTER MODAL */}

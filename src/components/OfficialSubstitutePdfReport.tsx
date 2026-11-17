@@ -1,0 +1,450 @@
+"use client";
+
+import React, { useState } from "react";
+import { Printer, X, Sparkles, UserCheck, ShieldCheck } from "lucide-react";
+import { AcademicTerm, SchoolProfile, SubstituteAssignment, Teacher } from "@/types";
+import { formatThaiDateLong, getThaiDateString } from "@/lib/dateUtils";
+
+interface OfficialSubstitutePdfReportProps {
+  schoolProfile: SchoolProfile;
+  term: AcademicTerm | null;
+  substitutes: SubstituteAssignment[];
+  teachers: Teacher[];
+  dateRangeLabel: string;
+  onClose: () => void;
+}
+
+export default function OfficialSubstitutePdfReport({
+  schoolProfile,
+  term,
+  substitutes,
+  teachers,
+  dateRangeLabel,
+  onClose,
+}: OfficialSubstitutePdfReportProps) {
+  // Aggregate KPIs
+  const totalSubPeriods = substitutes.length;
+  const subTeachersSet = new Set(
+    substitutes.map((s) => s.substituteTeacherId || s.substituteTeacherName).filter(Boolean)
+  );
+  const absentTeachersSet = new Set(
+    substitutes.map((s) => s.originalTeacherId || s.originalTeacherName).filter(Boolean)
+  );
+
+  const sickCount = substitutes.filter((s) => s.leaveType === "sick").length;
+  const personalCount = substitutes.filter((s) => s.leaveType === "personal").length;
+  const officialCount = substitutes.filter((s) => s.leaveType === "official").length;
+
+  // Aggregate stats per substitute teacher
+  const teacherSubStats = React.useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        dept: string;
+        periodsCount: number;
+        details: { date: string; period: number; gradeRoom: string; subject: string }[];
+      }
+    >();
+
+    substitutes.forEach((sub) => {
+      const key = sub.substituteTeacherName || sub.substituteTeacherId || "unknown";
+      if (!map.has(key)) {
+        // Try finding official department from teachers list
+        const found = teachers.find(
+          (t) =>
+            t.id === sub.substituteTeacherId ||
+            t.fullName === sub.substituteTeacherName ||
+            `${t.prefix}${t.fullName}` === sub.substituteTeacherName
+        );
+        map.set(key, {
+          id: sub.substituteTeacherId,
+          name: sub.substituteTeacherName,
+          dept: found ? found.department : sub.substituteDepartment || "กลุ่มสาระการเรียนรู้",
+          periodsCount: 0,
+          details: [],
+        });
+      }
+
+      const item = map.get(key)!;
+      item.periodsCount += 1;
+      item.details.push({
+        date: sub.date,
+        period: sub.periodStart,
+        gradeRoom: sub.gradeRoom,
+        subject: sub.subjectCode || sub.subjectName,
+      });
+    });
+
+    // Sort descending by periodsCount
+    return Array.from(map.values()).sort((a, b) => b.periodsCount - a.periodsCount);
+  }, [substitutes, teachers]);
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const termDisplay = term
+    ? `ภาคเรียนที่ ${term.term} ปีการศึกษา ${term.year}`
+    : "ภาคเรียนที่ 2 ปีการศึกษา 2569";
+
+  const todayThai = formatThaiDateLong(getThaiDateString());
+
+  // Default Signers
+  const signers =
+    schoolProfile.signers && schoolProfile.signers.length > 0
+      ? schoolProfile.signers
+      : [
+          {
+            id: "s1",
+            roleTitle: "ผู้จัดทำรายงาน",
+            name: "นางสาวพัทธวรรณ สุวรรณวาปี",
+            position: "เจ้าหน้าที่งานตารางสอนและจัดสอนแทน",
+          },
+          {
+            id: "s2",
+            roleTitle: "ผู้ตรวจสอบ",
+            name: schoolProfile.academicHeadName || "นายทนงศักดิ์ สมใจคง",
+            position: "หัวหน้ากลุ่มบริหารงานวิชาการ",
+          },
+          {
+            id: "s3",
+            roleTitle: "ผู้อนุมัติ",
+            name: schoolProfile.directorName || "นายสุขุม สร้อยคำ",
+            position: "ผู้อำนวยการโรงเรียนหนองวัวซอพิทยาคม",
+          },
+        ];
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-6 print:p-0 print:static print:bg-white">
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 12mm 15mm 15mm 15mm;
+          }
+          html, body {
+            background: white !important;
+            color: black !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            font-size: 11pt !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .report-sheet {
+            box-shadow: none !important;
+            border: none !important;
+            padding: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
+          }
+          .page-break-before {
+            page-break-before: always !important;
+            break-before: page !important;
+          }
+          .avoid-break {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
+
+      <div className="bg-white rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:border-none print:rounded-none">
+        {/* Modal Top Bar (Hidden on Print) */}
+        <div className="bg-slate-900 text-white p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 no-print">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold">
+                รายงานสถิติการจัดสอนแทนและครูผู้เข้าสอนแทน (Official PDF Report)
+              </h2>
+              <p className="text-xs text-slate-400">
+                โรงเรียนหนองวัวซอพิทยาคม &bull; เอกสารทางการฝ่ายบริหารงานวิชาการ
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-colors"
+            >
+              <Printer className="w-4 h-4" />
+              <span>พิมพ์รายงาน (Print / Save as PDF)</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Printable Official Document */}
+        <div className="p-6 sm:p-10 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 font-sans leading-relaxed report-sheet">
+          {/* 1. Official Header */}
+          <div className="text-center border-b-2 border-slate-900 pb-5 mb-5 relative">
+            <div className="flex items-center justify-center gap-3 mb-2">
+              <img
+                src="/LOGO-N.png"
+                alt="โรงเรียนหนองวัวซอพิทยาคม"
+                className="w-16 h-16 object-contain"
+              />
+              <div className="text-center">
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"}
+                </h1>
+                <p className="text-xs sm:text-sm font-semibold text-slate-700">
+                  สำนักงานเขตพื้นที่การศึกษามัธยมศึกษาอุดรธานี
+                </p>
+                <p className="text-xs text-slate-600">
+                  กลุ่มบริหารงานวิชาการ &bull; งานตารางสอนและการจัดสอนแทน
+                </p>
+              </div>
+            </div>
+
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-2">
+              รายงานสรุปสถิติการจัดสอนแทนและการปฏิบัติหน้าที่สอนแทนของครูผู้สอน
+            </h2>
+            <p className="text-xs text-slate-600 mt-0.5">
+              ประจำ{termDisplay} &bull; ช่วงเวลาที่รายงาน: <strong>{dateRangeLabel}</strong>
+            </p>
+
+            <div className="text-right text-[10px] text-slate-500 mt-1">
+              วันที่พิมพ์เอกสาร: {todayThai}
+            </div>
+          </div>
+
+          {/* 2. Executive KPI Box */}
+          <div className="bg-slate-50 border border-slate-300 rounded-2xl p-4 mb-6 avoid-break print:bg-white print:border-slate-400">
+            <div className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-sky-700" />
+              <span>สรุปภาพรวมการจัดสอนแทนในช่วงเวลาที่รายงาน</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
+              <div className="bg-white p-3 rounded-xl border border-slate-200">
+                <div className="text-[11px] text-slate-500">คาบจัดสอนแทนรวม</div>
+                <div className="text-2xl font-black text-indigo-700 mt-0.5">
+                  {totalSubPeriods} <span className="text-xs font-normal text-slate-500">คาบ</span>
+                </div>
+              </div>
+              <div className="bg-white p-3 rounded-xl border border-slate-200">
+                <div className="text-[11px] text-slate-500">ครูผู้เข้าสอนแทน</div>
+                <div className="text-2xl font-black text-sky-700 mt-0.5">
+                  {subTeachersSet.size} <span className="text-xs font-normal text-slate-500">ท่าน</span>
+                </div>
+              </div>
+              <div className="bg-white p-3 rounded-xl border border-slate-200">
+                <div className="text-[11px] text-slate-500">ครูที่ขอลา</div>
+                <div className="text-2xl font-black text-slate-800 mt-0.5">
+                  {absentTeachersSet.size} <span className="text-xs font-normal text-slate-500">ท่าน</span>
+                </div>
+              </div>
+              <div className="bg-white p-3 rounded-xl border border-slate-200 text-left space-y-1 text-[11px]">
+                <div className="text-slate-500 font-bold">จำแนกตามประเภทการลา:</div>
+                <div className="flex justify-between">
+                  <span className="text-rose-700">&bull; ลาป่วย:</span>
+                  <strong>{sickCount} คาบ</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-amber-700">&bull; ลากิจ:</span>
+                  <strong>{personalCount} คาบ</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-700">&bull; ไปราชการ:</span>
+                  <strong>{officialCount} คาบ</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Section 1: Summary Table per Substitute Teacher */}
+          <div className="mb-6 avoid-break">
+            <h3 className="text-sm font-bold text-slate-900 border-b border-slate-300 pb-1 mb-2.5 flex items-center justify-between">
+              <span>ตอนที่ 1: บัญชีสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคล</span>
+              <span className="text-xs font-normal text-slate-500">
+                (ครูผู้สอนแทนทั้งหมด {teacherSubStats.length} ท่าน)
+              </span>
+            </h3>
+
+            <table className="w-full text-xs text-left border-collapse border border-slate-300">
+              <thead className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300">
+                <tr>
+                  <th className="p-2 border border-slate-300 w-12 text-center">ลำดับ</th>
+                  <th className="p-2 border border-slate-300">ชื่อ-สกุล ครูผู้เข้าสอนแทน</th>
+                  <th className="p-2 border border-slate-300">กลุ่มสาระการเรียนรู้</th>
+                  <th className="p-2 border border-slate-300 text-center w-28">
+                    จำนวนคาบสอนแทน
+                  </th>
+                  <th className="p-2 border border-slate-300">ห้องเรียนและวิชาที่สอนแทน</th>
+                  <th className="p-2 border border-slate-300 w-24 text-center">ลายมือชื่อ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teacherSubStats.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-6 text-center text-slate-400 border border-slate-300">
+                      ไม่พบข้อมูลการปฏิบัติหน้าที่สอนแทนในช่วงเวลานี้
+                    </td>
+                  </tr>
+                ) : (
+                  teacherSubStats.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80">
+                      <td className="p-2 border border-slate-300 text-center font-mono">
+                        {idx + 1}
+                      </td>
+                      <td className="p-2 border border-slate-300 font-bold text-slate-900">
+                        {item.name}
+                      </td>
+                      <td className="p-2 border border-slate-300 text-slate-600">
+                        {item.dept.replace("กลุ่มสาระการเรียนรู้", "")}
+                      </td>
+                      <td className="p-2 border border-slate-300 text-center font-bold text-indigo-900 font-mono text-sm">
+                        {item.periodsCount}
+                      </td>
+                      <td className="p-2 border border-slate-300 text-[10px] text-slate-600">
+                        {item.details
+                          .map((d) => `${d.gradeRoom} (คาบ ${d.period})`)
+                          .slice(0, 4)
+                          .join(", ")}
+                        {item.details.length > 4 && ` และอีก ${item.details.length - 4} คาบ`}
+                      </td>
+                      <td className="p-2 border border-slate-300 text-center text-slate-300">
+                        .....................
+                      </td>
+                    </tr>
+                  ))
+                )}
+                {teacherSubStats.length > 0 && (
+                  <tr className="bg-slate-100 font-bold text-slate-900">
+                    <td colSpan={3} className="p-2 border border-slate-300 text-right">
+                      รวมจำนวนคาบที่ครูเข้าสอนแทนทั้งสิ้น:
+                    </td>
+                    <td className="p-2 border border-slate-300 text-center text-sm font-mono text-indigo-900">
+                      {totalSubPeriods} คาบ
+                    </td>
+                    <td colSpan={2} className="p-2 border border-slate-300 text-slate-500 text-[10px]">
+                      (เฉลี่ย {teacherSubStats.length > 0 ? (totalSubPeriods / teacherSubStats.length).toFixed(1) : 0} คาบ/ท่าน)
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 4. Section 2: Detailed Substitute Log (Chronological) */}
+          <div className="mb-8 avoid-break">
+            <h3 className="text-sm font-bold text-slate-900 border-b border-slate-300 pb-1 mb-2.5 flex items-center justify-between">
+              <span>ตอนที่ 2: บัญชีรายละเอียดรายการจัดสอนแทนรายคาบ</span>
+              <span className="text-xs font-normal text-slate-500">
+                ({substitutes.length} คาบเรียน)
+              </span>
+            </h3>
+
+            <table className="w-full text-xs text-left border-collapse border border-slate-300">
+              <thead className="bg-slate-100 text-slate-800 font-bold border-b border-slate-300 text-[11px]">
+                <tr>
+                  <th className="p-1.5 border border-slate-300 w-10 text-center">ลำดับ</th>
+                  <th className="p-1.5 border border-slate-300 w-24 text-center">วันที่ & คาบ</th>
+                  <th className="p-1.5 border border-slate-300 w-20 text-center">ห้องเรียน</th>
+                  <th className="p-1.5 border border-slate-300">วิชาที่สอน</th>
+                  <th className="p-1.5 border border-slate-300">ครูประจำวิชาที่ขอลา</th>
+                  <th className="p-1.5 border border-slate-300 w-16 text-center">สาเหตุการลา</th>
+                  <th className="p-1.5 border border-slate-300">ครูผู้ปฏิบัติหน้าที่สอนแทน</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {substitutes.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-6 text-center text-slate-400 border border-slate-300">
+                      ไม่พบประวัติรายการจัดสอนแทน
+                    </td>
+                  </tr>
+                ) : (
+                  substitutes.map((s, idx) => (
+                    <tr key={s.id || idx} className="hover:bg-slate-50/80">
+                      <td className="p-1.5 border border-slate-300 text-center font-mono text-[10px]">
+                        {idx + 1}
+                      </td>
+                      <td className="p-1.5 border border-slate-300 text-center text-[10px] whitespace-nowrap">
+                        <span className="font-bold">{s.date}</span> (คาบ {s.periodStart})
+                      </td>
+                      <td className="p-1.5 border border-slate-300 text-center font-bold">
+                        {s.gradeRoom}
+                      </td>
+                      <td className="p-1.5 border border-slate-300 text-[10px]">
+                        <strong>{s.subjectCode}</strong> {s.subjectName}
+                      </td>
+                      <td className="p-1.5 border border-slate-300 font-semibold text-slate-800">
+                        {s.originalTeacherName}
+                      </td>
+                      <td className="p-1.5 border border-slate-300 text-center text-[10px]">
+                        {s.leaveType === "sick"
+                          ? "ลาป่วย"
+                          : s.leaveType === "personal"
+                          ? "ลากิจ"
+                          : "ไปราชการ"}
+                      </td>
+                      <td className="p-1.5 border border-slate-300 font-bold text-indigo-900">
+                        {s.substituteTeacherName || "ยังไม่มีผู้สอนแทน"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 5. Section 3: Official Signatures (3 Signers) */}
+          <div className="mt-8 pt-4 border-t border-slate-300 avoid-break">
+            <p className="text-[11px] text-slate-600 mb-6 text-center italic">
+              ขอรับรองว่ารายงานสถิติการจัดสอนแทนและการปฏิบัติหน้าที่สอนแทนของครูผู้สอนฉบับนี้ ถูกต้องตรงตามความเป็นจริงทุกประการ
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs">
+              {signers.map((signer, idx) => (
+                <div key={idx} className="space-y-1">
+                  <div className="font-semibold text-slate-600 text-[11px]">
+                    ({signer.roleTitle || "ผู้ลงนาม"})
+                  </div>
+                  <div className="pt-10 border-b border-dotted border-slate-400 mx-auto w-44"></div>
+                  <div className="font-bold text-slate-800 pt-1">
+                    ({signer.name})
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {signer.position}
+                  </div>
+                  <div className="text-[10px] text-slate-400 pt-0.5">
+                    วันที่ .......... / .......... / ..........
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Footer (Hidden on Print) */}
+        <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-3 no-print">
+          <div>
+            💡 <strong className="text-slate-700">คำแนะนำ:</strong> สามารถกดสั่งพิมพ์เพื่อพิมพ์ออกเครื่องพิมพ์ หรือเลือกปลายทางเป็น <strong>&quot;บันทึกเป็น PDF (Save as PDF)&quot;</strong> เพื่อจัดเก็บไฟล์เอกสารราชการได้ทันที
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 font-semibold text-slate-700 transition-colors"
+          >
+            ปิดหน้าต่าง
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
