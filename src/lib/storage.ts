@@ -534,15 +534,24 @@ export async function updateAttendanceLog(record: AttendanceRecord): Promise<voi
 }
 
 export async function deleteAttendanceLog(id: string): Promise<void> {
+  // 1. Immediately delete from local storage to guarantee 0ms consistency
+  const currentLocal = getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
+  const updatedLocal = currentLocal.filter((a) => a.id !== id);
+  setLocal(STORAGE_KEYS.ATTENDANCE, updatedLocal);
+
+  // 2. Delete from Firestore if online
   if (db) {
     try {
       await deleteDoc(doc(db, "attendance_logs", id));
     } catch (e) {
-      console.error(e);
+      console.error("Firestore deleteDoc error:", e);
     }
   }
-  const all = (await getAttendanceLogs()).filter((a) => a.id !== id);
-  setLocal(STORAGE_KEYS.ATTENDANCE, all);
+
+  // 3. Dispatch storage event for other windows/tabs
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("storage"));
+  }
 }
 
 // Real-time subscription for attendance logs
@@ -551,10 +560,11 @@ export function subscribeAttendance(callback: (records: AttendanceRecord[]) => v
   const cached = getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE);
   callback(cached);
 
+  let unsubFirestore: (() => void) | null = null;
   if (db) {
     try {
       const q = collection(db, "attendance_logs");
-      const unsubscribe = onSnapshot(
+      unsubFirestore = onSnapshot(
         q,
         (snapshot) => {
           const records = snapshot.docs.map((d) => d.data() as AttendanceRecord);
@@ -570,16 +580,19 @@ export function subscribeAttendance(callback: (records: AttendanceRecord[]) => v
           console.warn("Firestore subscription error:", error);
         }
       );
-      return unsubscribe;
     } catch (e) {
       console.warn("Firestore subscription failed, fallback to local:", e);
     }
   }
-  // Local fallback
-  const update = () => {
+  // Local fallback / cross-window update
+  const unsubLocal = subscribe(STORAGE_KEYS.ATTENDANCE, () => {
     callback(getLocal<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, INITIAL_ATTENDANCE));
+  });
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    unsubLocal();
   };
-  return subscribe(STORAGE_KEYS.ATTENDANCE, update);
 }
 
 // ==================== 8. SCHOOL PROFILE ====================

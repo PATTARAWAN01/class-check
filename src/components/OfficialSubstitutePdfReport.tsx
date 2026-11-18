@@ -3,7 +3,7 @@
 import React, { useEffect } from "react";
 import { Printer, X, Sparkles, UserCheck } from "lucide-react";
 import { AcademicTerm, SchoolProfile, SubstituteAssignment, Teacher } from "@/types";
-import { formatThaiDateLong, getThaiDateString } from "@/lib/dateUtils";
+import { formatThaiDateLong, formatThaiDateShort, getThaiDateString } from "@/lib/dateUtils";
 
 interface OfficialSubstitutePdfReportProps {
   schoolProfile: SchoolProfile;
@@ -190,37 +190,33 @@ export default function OfficialSubstitutePdfReport({
         </div>
 
         {/* Printable Official Document */}
-        <div className="p-6 sm:p-10 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 font-sans leading-relaxed report-sheet">
-          {/* 1. Official Header */}
-          <div className="text-center border-b-2 border-slate-900 pb-5 mb-5 relative">
-            <div className="flex items-center justify-center gap-3.5 mb-2.5">
+        <div className="p-6 sm:p-10 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 font-['TH_Sarabun_New','Sarabun',sans-serif] leading-relaxed report-sheet">
+          {/* 1. Official Standardized Header */}
+          <div className="text-center border-b-2 border-slate-900 pb-4 mb-4 relative">
+            <div className="flex flex-col items-center justify-center gap-1 mb-2">
+              {/* Line 1: Logo */}
               <img
-                src="/LOGO-N.png"
-                alt="โรงเรียนหนองวัวซอพิทยาคม"
-                className="w-16 h-16 object-contain"
+                src={schoolProfile.logoUrl || "/LOGO-N.png"}
+                alt="ตราโรงเรียนหนองวัวซอพิทยาคม"
+                className="w-16 h-16 object-contain mx-auto print:w-14 print:h-14"
               />
-              <div className="text-center">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                  {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"}
-                </h1>
-                <p className="text-xs sm:text-sm font-semibold text-slate-700">
-                  สำนักงานเขตพื้นที่การศึกษามัธยมศึกษาอุดรธานี
-                </p>
-                <p className="text-xs text-slate-600">
-                  กลุ่มบริหารงานวิชาการ &bull; งานตารางสอนและการจัดสอนแทน
-                </p>
-              </div>
+              {/* Line 2: Title */}
+              <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+                รายงานสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคล
+              </h2>
+              {/* Line 3: School Name */}
+              <h1 className="text-sm sm:text-base font-semibold text-slate-800">
+                {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"} &bull; กลุ่มบริหารงานวิชาการ
+              </h1>
+              {/* Line 4: Term & Short Thai Date */}
+              <p className="text-xs text-slate-600 font-medium">
+                ประจำ{termDisplay} &bull; วันที่ {formatThaiDateShort(getThaiDateString())}
+              </p>
             </div>
 
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-2">
-              รายงานสรุปจำนวนคาบการปฏิบัติหน้าที่เข้าสอนแทนสะสมรายบุคคล
-            </h2>
-            <p className="text-xs text-slate-600 mt-1">
-              ประจำ{termDisplay} &bull; ช่วงเวลาที่รายงาน: <strong>{dateRangeLabel}</strong>
-            </p>
-
-            <div className="text-right text-[10px] text-slate-500 mt-1.5">
-              วันที่พิมพ์เอกสาร: {todayThai}
+            <div className="flex items-center justify-between text-xs text-slate-600 border-t pt-1 border-slate-200 mt-2">
+              <span>ช่วงเวลาที่รายงาน: <strong>{dateRangeLabel}</strong></span>
+              <span>วันที่พิมพ์เอกสาร: {todayThai}</span>
             </div>
           </div>
 

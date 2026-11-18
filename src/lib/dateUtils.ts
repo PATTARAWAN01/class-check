@@ -30,6 +30,20 @@ export function getThaiOffsetDate(offsetDays: number = 0): string {
   return getThaiDateString(bangkokTime);
 }
 
+export function formatThaiDateShort(dateStr: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length < 3 || isNaN(parts[0])) return dateStr;
+  const [y, m, d] = parts;
+  const thaiShortMonths = [
+    "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
+  ];
+  const shortMonth = thaiShortMonths[m - 1] || "";
+  const thaiYear = y + 543;
+  return `${d} ${shortMonth} ${thaiYear}`;
+}
+
 export function formatThaiDateLong(dateStr: string): string {
   if (!dateStr) return "";
   const parts = dateStr.split("-").map(Number);

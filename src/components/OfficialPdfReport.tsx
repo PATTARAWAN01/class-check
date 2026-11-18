@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Printer, X, Image as ImageIcon, Loader2 } from "lucide-react";
 import { AcademicTerm, AttendanceRecord, SchoolProfile, Teacher } from "@/types";
-import { getThaiDateString } from "@/lib/dateUtils";
+import { getThaiDateString, formatThaiDateShort } from "@/lib/dateUtils";
 import { toPng } from "html-to-image";
 
 interface OfficialPdfReportProps {
@@ -179,14 +179,27 @@ export default function OfficialPdfReport({
   };
 
   const handleExportImage = async () => {
+    const modal = document.getElementById("official-pdf-report-modal");
     const element = document.getElementById("official-report-sheet");
     if (!element) return;
     try {
       setIsExportingImage(true);
+      if (modal) modal.scrollLeft = 0;
+
+      const fullHeight = element.scrollHeight;
+      const fullWidth = element.scrollWidth;
+
       const dataUrl = await toPng(element, {
         quality: 0.95,
         backgroundColor: "#ffffff",
         pixelRatio: 2,
+        height: fullHeight,
+        width: fullWidth,
+        style: {
+          margin: "0",
+          transform: "none",
+          maxWidth: "none",
+        },
       });
       const link = document.createElement("a");
       link.download = `${pdfFileName}.png`;
@@ -307,35 +320,41 @@ export default function OfficialPdfReport({
         {/* Official A4 Document Container */}
         <div
           id="official-report-sheet"
-          className="report-document-sheet bg-white text-slate-900 shrink-0 w-[210mm] min-w-[210mm] min-h-[297mm] p-6 sm:p-10 rounded-2xl shadow-2xl mx-auto print:m-0 print:p-0 print:shadow-none print:w-full print:max-w-none print:min-w-0 print:min-h-0 print:rounded-none font-['Sarabun'] leading-relaxed print:text-black"
+          className="report-document-sheet bg-white text-slate-900 shrink-0 w-[210mm] min-w-[210mm] min-h-[297mm] p-6 sm:p-10 rounded-2xl shadow-2xl mx-auto print:m-0 print:p-0 print:shadow-none print:w-full print:max-w-none print:min-w-0 print:min-h-0 print:rounded-none font-['TH_Sarabun_New','Sarabun',sans-serif] leading-relaxed print:text-black"
         >
-          {/* Document Header */}
-          <div className="text-center border-b-2 border-slate-900 pb-3 mb-4 print:pb-1 print:mb-1">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-2 flex items-center justify-center print:w-7 print:h-7 print:mb-0.5">
+          {/* Document Header (Standardized Format) */}
+          <div className="text-center border-b-2 border-slate-900 pb-3 mb-3 print:pb-1 print:mb-1">
+            {/* Line 1: Logo (Enlarged and balanced) */}
+            <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-1 flex items-center justify-center print:w-12 print:h-12 print:mb-0.5">
               <img
                 src={schoolProfile.logoUrl || "/LOGO-N.png"}
                 alt="ตราโรงเรียนหนองวัวซอพิทยาคม"
                 width={80}
                 height={80}
                 style={{ width: "80px", height: "80px", objectFit: "contain" }}
-                className="w-full h-full object-contain drop-shadow-sm print:w-7 print:h-7"
+                className="w-full h-full object-contain drop-shadow-sm print:w-12 print:h-12"
               />
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 print:text-[9.5pt] print:leading-tight">
-              {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"}
-            </h1>
-            <h2 className="text-base sm:text-lg font-semibold text-slate-800 mt-1 print:text-[8pt] print:leading-tight print:mt-0">
+
+            {/* Line 2: Title */}
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 print:text-[8.8pt] print:leading-tight">
               {teacher
                 ? "รายงานผลการปฏิบัติการสอนของครูผู้สอน (รายบุคคล)"
                 : "รายงานสรุปภาพรวมการปฏิบัติการสอนของครูผู้สอนทุกคน"}
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 mt-1 print:text-[6.8pt] print:leading-tight print:mt-0">
-              ภาคเรียนที่ {term?.term || "2"} ปีการศึกษา {term?.year || "2569"} &bull;{" "}
-              {dateRangeLabel}
+
+            {/* Line 3: School Name */}
+            <h1 className="text-xs sm:text-sm font-semibold text-slate-800 mt-0.5 print:text-[7.8pt] print:leading-tight print:mt-0">
+              {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"} &bull; กลุ่มบริหารงานวิชาการ
+            </h1>
+
+            {/* Line 4: Term & Short Thai Date */}
+            <p className="text-xs sm:text-sm text-slate-600 mt-0.5 print:text-[6.8pt] print:leading-tight print:mt-0">
+              ภาคเรียนที่ {term?.term || "2"} ปีการศึกษา {term?.year || "2569"} &bull; วันที่ {formatThaiDateShort(getThaiDateString())} ({dateRangeLabel})
             </p>
 
             {teacher && (
-              <div className="mt-2 text-sm font-bold text-sky-900 bg-sky-50 inline-block px-4 py-1 rounded-full border border-sky-200 print:text-[7.5pt] print:py-0.5">
+              <div className="mt-1.5 text-sm font-bold text-sky-900 bg-sky-50 inline-block px-4 py-0.5 rounded-full border border-sky-200 print:text-[7pt] print:py-0">
                 ครูผู้สอน: {teacher.prefix}{teacher.fullName} ({teacher.department})
               </div>
             )}

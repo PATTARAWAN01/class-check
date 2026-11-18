@@ -111,7 +111,23 @@ export default function StatisticsPage() {
       list = list.filter((r) => r.date >= customStartDate && r.date <= customEndDate);
     }
 
-    return list;
+    // Deduplicate records: if the same room, date, and period was recorded more than once, keep only the latest record
+    const seen = new Map<string, AttendanceRecord>();
+    list.forEach((r) => {
+      const key = `${r.classroomId}_${r.date}_${r.periodStart}`;
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, r);
+      } else {
+        const existingTime = existing.updatedAt || existing.createdAt || "";
+        const currTime = r.updatedAt || r.createdAt || "";
+        if (currTime >= existingTime) {
+          seen.set(key, r);
+        }
+      }
+    });
+
+    return Array.from(seen.values());
   }, [allAttendance, selectedTermId, timeFilter, customStartDate, customEndDate]);
 
   // Filter substitute records by Time range and Department
@@ -1051,6 +1067,11 @@ export default function StatisticsPage() {
                     r.teacherName === `${inspectTeacher.prefix}${inspectTeacher.fullName}`
                 );
 
+                const teacherTotalPeriods = teacherRecords.reduce(
+                  (acc, r) => acc + (r.periodCount || 1),
+                  0
+                );
+
                 if (teacherRecords.length === 0) {
                   return (
                     <div className="text-center py-12 text-slate-400">
@@ -1060,34 +1081,47 @@ export default function StatisticsPage() {
                 }
 
                 return (
-                  <div className="divide-y divide-slate-100">
-                    {teacherRecords.map((r) => (
-                      <div
-                        key={r.id}
-                        className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-800">
-                              {r.date}
-                            </span>
-                            <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700 font-semibold">
-                              {r.periodStart === r.periodEnd
-                                ? `คาบ ${r.periodStart}`
-                                : `คาบ ${r.periodStart}-${r.periodEnd}`}
-                            </span>
-                            <span className="px-2 py-0.5 rounded text-xs bg-sky-50 text-sky-700 font-medium">
-                              ห้อง {r.gradeRoom}
-                            </span>
-                          </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs text-slate-500 pb-2 border-b border-slate-100">
+                      <span>ประวัติการเข้าสอนในช่วงเวลาที่เลือก</span>
+                      <span className="font-bold bg-sky-50 text-sky-800 px-2.5 py-1 rounded-full border border-sky-200">
+                        รวม {teacherTotalPeriods} คาบ ({teacherRecords.length} รายการบันทึก)
+                      </span>
+                    </div>
 
-                          <div className="text-xs text-slate-600 mt-1">
-                            วิชา: <strong className="text-slate-800">{r.subjectCode} {r.subjectName}</strong>
-                          </div>
+                    <div className="divide-y divide-slate-100">
+                      {teacherRecords.map((r) => (
+                        <div
+                          key={r.id}
+                          className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-800">
+                                {r.date}
+                              </span>
+                              <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700 font-semibold">
+                                {r.periodStart === r.periodEnd
+                                  ? `คาบ ${r.periodStart}`
+                                  : `คาบ ${r.periodStart}-${r.periodEnd}`}
+                              </span>
+                              {r.periodStart !== r.periodEnd && (
+                                <span className="px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700 font-bold border border-indigo-200">
+                                  คาบคู่ (2 คาบ)
+                                </span>
+                              )}
+                              <span className="px-2 py-0.5 rounded text-xs bg-sky-50 text-sky-700 font-medium">
+                                ห้อง {r.gradeRoom}
+                              </span>
+                            </div>
 
-                          <div className="text-[11px] text-slate-400 mt-0.5">
-                            บันทึกโดย: {r.recordedByStudent} &bull; เวลา {new Date(r.createdAt).toLocaleTimeString("th-TH")}
-                          </div>
+                            <div className="text-xs text-slate-600 mt-1">
+                              วิชา: <strong className="text-slate-800">{r.subjectCode} {r.subjectName}</strong>
+                            </div>
+
+                            <div className="text-[11px] text-slate-400 mt-0.5">
+                              บันทึกโดย: {r.recordedByStudent} &bull; เวลา {new Date(r.createdAt).toLocaleTimeString("th-TH")}
+                            </div>
 
                           {r.status === "absent" && r.absenceNote && (
                             <div className="text-xs text-rose-600 mt-1 bg-rose-50 p-1.5 rounded-lg border border-rose-100">
@@ -1131,6 +1165,7 @@ export default function StatisticsPage() {
                         </div>
                       </div>
                     ))}
+                    </div>
                   </div>
                 );
               })()}

@@ -10,7 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Classroom, AttendanceRecord, SchoolProfile, TimetableEntry } from "@/types";
-import { formatThaiDateLong, getThaiDateString } from "@/lib/dateUtils";
+import { formatThaiDateLong, formatThaiDateShort, getThaiDateString } from "@/lib/dateUtils";
 import { toPng } from "html-to-image";
 
 interface ClassroomPeriodMatrixModalProps {
@@ -21,6 +21,15 @@ interface ClassroomPeriodMatrixModalProps {
   schoolProfile: SchoolProfile;
   initialDate?: string;
   timetable?: TimetableEntry[];
+}
+
+function getTeacherFirstName(fullName: string = ""): string {
+  if (!fullName) return "";
+  const clean = fullName
+    .replace(/^(นาย|นางสาว|นาง|ว่าที่ร้อยตรี|ดร\.|อ\.|ครู)\s*/g, "")
+    .trim();
+  const parts = clean.split(/\s+/);
+  return parts[0] || clean;
 }
 
 export default function ClassroomPeriodMatrixModal({
@@ -61,10 +70,23 @@ export default function ClassroomPeriodMatrixModal({
     if (!element) return;
     try {
       setIsExportingImage(true);
+      // Ensure full scroll height and width are captured completely without viewport clipping
+      const fullHeight = element.scrollHeight;
+      const fullWidth = element.scrollWidth;
+
       const dataUrl = await toPng(element, {
         quality: 0.95,
         backgroundColor: "#ffffff",
         pixelRatio: 2,
+        height: fullHeight,
+        width: fullWidth,
+        style: {
+          height: `${fullHeight}px`,
+          maxHeight: "none",
+          overflow: "visible",
+          margin: "0",
+          transform: "none",
+        },
       });
       const link = document.createElement("a");
       link.download = `${pdfFileName}.png`;
@@ -116,25 +138,28 @@ export default function ClassroomPeriodMatrixModal({
     return map;
   }, [dayRecords]);
 
-  // Helper to identify non-academic / special activity periods from timetable
-  const getSpecialActivityLabel = (
+  // Look up timetable entry for this classroom, day of week, and period
+  const getTimetableEntry = (
     clsId: string,
     gradeRoom: string,
     pNum: number,
     dOfWeek: number
-  ): string | null => {
-    if (!timetable || timetable.length === 0) return null;
-    const match = timetable.find(
+  ): TimetableEntry | undefined => {
+    if (!timetable || timetable.length === 0) return undefined;
+    return timetable.find(
       (tt) =>
         (tt.classroomId === clsId || tt.gradeRoom === gradeRoom) &&
         tt.dayOfWeek === dOfWeek &&
         pNum >= tt.periodStart &&
         pNum <= tt.periodEnd
     );
-    if (!match) return null;
+  };
 
-    const name = match.subjectName || "";
-    const code = match.subjectCode || "";
+  // Identify special non-academic activity periods from timetable
+  const getSpecialActivityLabel = (entry?: TimetableEntry): string | null => {
+    if (!entry) return null;
+    const name = entry.subjectName || "";
+    const code = entry.subjectCode || "";
     const combined = `${name} ${code}`;
 
     const activityKeywords = [
@@ -160,7 +185,7 @@ export default function ClassroomPeriodMatrixModal({
       }
     }
 
-    if (match.teacherName === "ไม่ระบุ" || !code || code === "-") {
+    if (entry.teacherName === "ไม่ระบุ" || !code || code === "-") {
       return name ? name.slice(0, 8) : "กิจกรรม";
     }
 
@@ -192,12 +217,12 @@ export default function ClassroomPeriodMatrixModal({
   const periods = [1, 2, 3, 4, 5, 6, 7];
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:static print:bg-white">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:static print:bg-white font-['TH_Sarabun_New','Sarabun',sans-serif]">
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 5mm 6mm 5mm 6mm;
+            margin: 4mm 5mm 4mm 5mm;
           }
           html, body {
             background: white !important;
@@ -205,6 +230,7 @@ export default function ClassroomPeriodMatrixModal({
             margin: 0 !important;
             padding: 0 !important;
             font-size: 8pt !important;
+            font-family: 'TH Sarabun New', 'Sarabun', sans-serif !important;
           }
           .no-print {
             display: none !important;
@@ -215,6 +241,7 @@ export default function ClassroomPeriodMatrixModal({
             padding: 0 !important;
             width: 100% !important;
             max-width: 100% !important;
+            font-family: 'TH Sarabun New', 'Sarabun', sans-serif !important;
           }
           .matrix-table {
             border-collapse: collapse !important;
@@ -222,7 +249,7 @@ export default function ClassroomPeriodMatrixModal({
           }
           .matrix-table th, .matrix-table td {
             border: 1px solid #475569 !important;
-            padding: 2px 2.5px !important;
+            padding: 1.5px 2px !important;
             line-height: 1.1 !important;
           }
           .avoid-break {
@@ -234,7 +261,7 @@ export default function ClassroomPeriodMatrixModal({
 
       <div className="bg-white rounded-3xl max-w-6xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[96vh] print:max-h-none print:shadow-none print:border-none print:rounded-none">
         {/* Modal Top Bar (Hidden on Print) */}
-        <div className="bg-slate-900 text-white p-3 sm:p-4 flex flex-wrap items-center justify-between gap-2.5 no-print">
+        <div className="bg-slate-900 text-white p-3 sm:p-4 flex flex-wrap items-center justify-between gap-2.5 no-print font-sans">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
               <Calendar className="w-5 h-5" />
@@ -315,36 +342,41 @@ export default function ClassroomPeriodMatrixModal({
         {/* Printable Matrix Sheet */}
         <div
           id="matrix-printable-sheet"
-          className="p-4 sm:p-5 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 font-sans matrix-print-sheet bg-white"
+          className="p-4 sm:p-5 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 matrix-print-sheet bg-white"
         >
-          {/* Header */}
-          <div className="text-center border-b pb-2 mb-2 relative">
-            <div className="flex items-center justify-center gap-2 mb-1">
+          {/* Standardized Header */}
+          <div className="text-center border-b pb-2.5 mb-2.5 relative">
+            <div className="flex flex-col items-center justify-center gap-1 mb-1">
+              {/* Line 1: Logo (Enlarged and balanced) */}
               <img
-                src="/LOGO-N.png"
-                alt="โรงเรียนหนองวัวซอพิทยาคม"
-                className="w-9 h-9 object-contain"
+                src={schoolProfile.logoUrl || "/LOGO-N.png"}
+                alt="ตราโรงเรียนหนองวัวซอพิทยาคม"
+                className="w-14 h-14 object-contain mx-auto print:w-12 print:h-12"
               />
-              <div className="text-center">
-                <h1 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
-                  {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"}
-                </h1>
-                <p className="text-[10px] text-slate-600 font-semibold leading-tight">
-                  ตารางสรุปการปฏิบัติการสอนของครูผู้สอนรายห้องและรายคาบ &bull; กลุ่มบริหารงานวิชาการ
-                </p>
-              </div>
+              {/* Line 2: Title */}
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
+                ตารางสรุปการปฏิบัติการสอนของครูผู้สอนรายห้องและรายคาบ
+              </h2>
+              {/* Line 3: School Name */}
+              <h1 className="text-xs sm:text-sm font-semibold text-slate-800 leading-tight">
+                {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"} &bull; กลุ่มบริหารงานวิชาการ
+              </h1>
+              {/* Line 4: Term & Short Thai Date */}
+              <p className="text-[11px] text-slate-600 font-medium leading-tight">
+                ภาคเรียนที่ 2 ปีการศึกษา 2569 &bull; วันที่ {formatThaiDateShort(selectedDate)}
+              </p>
             </div>
 
-            <div className="flex items-center justify-between text-[11px] text-slate-700 font-bold px-1 mt-1">
+            <div className="flex items-center justify-between text-[10.5px] text-slate-700 font-bold px-1 mt-1 border-t pt-1 border-slate-200">
               <span>ประจำวัน: <strong>{thaiDateLabel}</strong> ({selectedDate})</span>
-              <span className="text-[9.5px] text-slate-500 font-normal">
-                สัญลักษณ์: <span className="text-emerald-700 font-bold">● ตรงเวลา</span> &bull; <span className="text-amber-700 font-bold">▲ สาย</span> &bull; <span className="text-rose-700 font-bold">✕ ไม่เข้าสอน</span> &bull; <span className="text-slate-500 font-medium bg-slate-100 px-1 rounded">[กิจกรรม/คาบว่าง]</span> &bull; <span className="text-slate-400">- ยังไม่เช็ค</span>
+              <span className="text-[9px] text-slate-500 font-normal">
+                สัญลักษณ์: <span className="text-emerald-700 font-bold">● ตรงเวลา</span> &bull; <span className="text-amber-700 font-bold">▲ สาย</span> &bull; <span className="text-rose-700 font-bold">✕ ไม่เข้าสอน</span> &bull; <span className="border border-dashed border-slate-400 px-1 rounded text-slate-600 bg-white">รหัสวิชา ครู [รอเช็ค]</span> &bull; <span className="text-slate-500 font-medium bg-slate-100 px-1 rounded">[กิจกรรม]</span>
               </span>
             </div>
           </div>
 
           {/* Quick Stats Pill (Hidden on Print) */}
-          <div className="mb-2.5 grid grid-cols-4 gap-2 text-center text-xs no-print">
+          <div className="mb-2.5 grid grid-cols-4 gap-2 text-center text-xs no-print font-sans">
             <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-200">
               <div className="text-[10px] text-emerald-800">เช็คครบ 7 คาบ</div>
               <div className="text-base font-bold text-emerald-900">{stats.fullyChecked} ห้อง</div>
@@ -398,24 +430,44 @@ export default function ClassroomPeriodMatrixModal({
 
                       {periods.map((pNum) => {
                         const rec = roomMap ? roomMap.get(pNum) : undefined;
-                        if (!rec) {
-                          const specialActivity = getSpecialActivityLabel(
-                            cls.id,
-                            cls.gradeRoom,
-                            pNum,
-                            dayOfWeek
-                          );
+                        const ttMatch = getTimetableEntry(cls.id, cls.gradeRoom, pNum, dayOfWeek);
+                        const specialActivity = getSpecialActivityLabel(ttMatch);
 
-                          if (specialActivity) {
+                        // Case 1: Checked records (On Time, Late, Absent) with subject code + teacher first name
+                        if (rec) {
+                          const teacherName = getTeacherFirstName(rec.teacherName);
+                          const label = `${rec.subjectCode || ""} ${teacherName}`.trim();
+
+                          if (rec.status === "on_time") {
                             return (
                               <td
                                 key={pNum}
-                                className="p-1 border border-slate-300 bg-slate-100/90 text-slate-500 text-center font-medium"
-                                title={`${specialActivity} (คาบกิจกรรม/คาบแยกเรียน ไม่ต้องเช็คเวลา)`}
+                                className="p-1 border border-slate-300 bg-emerald-50 text-emerald-950 font-semibold"
+                                title={`${rec.teacherName} (${rec.subjectCode}) - ตรงเวลา`}
                               >
-                                <span className="text-[8.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-600 font-semibold inline-block">
-                                  [{specialActivity}]
-                                </span>
+                                <div className="flex items-center justify-center gap-0.5 leading-tight">
+                                  <span className="text-[9px] text-emerald-700 font-bold shrink-0">●</span>
+                                  <span className="text-[8.5px] truncate max-w-[72px]">
+                                    {label || "ตรงเวลา"}
+                                  </span>
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          if (rec.status === "late") {
+                            return (
+                              <td
+                                key={pNum}
+                                className="p-1 border border-slate-300 bg-amber-50 text-amber-950 font-semibold"
+                                title={`${rec.teacherName} (${rec.subjectCode}) - เข้าสอนสาย`}
+                              >
+                                <div className="flex items-center justify-center gap-0.5 leading-tight">
+                                  <span className="text-[9px] text-amber-700 font-bold shrink-0">▲</span>
+                                  <span className="text-[8.5px] truncate max-w-[72px]">
+                                    {label || "สาย"}
+                                  </span>
+                                </div>
                               </td>
                             );
                           }
@@ -423,59 +475,59 @@ export default function ClassroomPeriodMatrixModal({
                           return (
                             <td
                               key={pNum}
-                              className="p-1 border border-slate-300 text-slate-300 bg-white"
+                              className="p-1 border border-slate-300 bg-rose-50 text-rose-950 font-bold"
+                              title={`${rec.teacherName} (${rec.subjectCode}) - ไม่เข้าสอน: ${rec.absenceReason || ""}`}
                             >
-                              -
-                            </td>
-                          );
-                        }
-
-                        if (rec.status === "on_time") {
-                          return (
-                            <td
-                              key={pNum}
-                              className="p-1 border border-slate-300 bg-emerald-50 text-emerald-900 font-semibold"
-                              title={`${rec.teacherName} (${rec.subjectCode}) - ตรงเวลา`}
-                            >
-                              <div className="flex items-center justify-center gap-0.5">
-                                <span className="text-[9px] text-emerald-700 font-bold">●</span>
-                                <span className="text-[9px] truncate max-w-[66px]">
-                                  {rec.subjectCode || "ตรงเวลา"}
+                              <div className="flex items-center justify-center gap-0.5 leading-tight">
+                                <span className="text-[9px] text-rose-600 font-bold shrink-0">✕</span>
+                                <span className="text-[8.5px] truncate max-w-[72px]">
+                                  {label || "ไม่เข้า"}
                                 </span>
                               </div>
                             </td>
                           );
                         }
 
-                        if (rec.status === "late") {
+                        // Case 2: Special Activity (ชุมนุม, ลูกเสือ, ติว, etc. - ไม่ต้องเช็ค)
+                        if (specialActivity) {
                           return (
                             <td
                               key={pNum}
-                              className="p-1 border border-slate-300 bg-amber-50 text-amber-900 font-semibold"
-                              title={`${rec.teacherName} (${rec.subjectCode}) - เข้าสอนสาย`}
+                              className="p-1 border border-slate-300 bg-slate-100/90 text-slate-500 text-center font-medium"
+                              title={`${specialActivity} (คาบกิจกรรม/คาบแยกเรียน ไม่ต้องเช็คเวลา)`}
                             >
-                              <div className="flex items-center justify-center gap-0.5">
-                                <span className="text-[9px] text-amber-700 font-bold">▲</span>
-                                <span className="text-[9px] truncate max-w-[66px]">
-                                  {rec.subjectCode || "สาย"}
-                                </span>
-                              </div>
+                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-600 font-semibold inline-block">
+                                [{specialActivity}]
+                              </span>
                             </td>
                           );
                         }
 
+                        // Case 3: Unchecked period but has scheduled class in timetable (white bg, dashed border, slate text)
+                        if (ttMatch && (ttMatch.subjectCode || ttMatch.teacherName)) {
+                          const teacherName = getTeacherFirstName(ttMatch.teacherName);
+                          const label = `${ttMatch.subjectCode || ""} ${teacherName}`.trim();
+                          return (
+                            <td
+                              key={pNum}
+                              className="p-1 border border-slate-300 border-dashed bg-white text-slate-600 text-center font-normal"
+                              title={`${ttMatch.teacherName} (${ttMatch.subjectCode}) - ยังไม่เช็ค`}
+                            >
+                              <span className="text-[8.5px] truncate max-w-[72px] inline-block opacity-85">
+                                {label}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        // Case 4: Free period / No timetable entry
                         return (
                           <td
                             key={pNum}
-                            className="p-1 border border-slate-300 bg-rose-50 text-rose-900 font-bold"
-                            title={`${rec.teacherName} (${rec.subjectCode}) - ไม่เข้าสอน: ${rec.absenceReason || ""}`}
+                            className="p-1 border border-slate-300 text-slate-300 bg-white text-center"
+                            title="คาบว่าง (ไม่มีในตารางสอน)"
                           >
-                            <div className="flex items-center justify-center gap-0.5">
-                              <span className="text-[9px] text-rose-600 font-bold">✕</span>
-                              <span className="text-[9px] truncate max-w-[66px]">
-                                {rec.subjectCode || "ไม่เข้า"}
-                              </span>
-                            </div>
+                            -
                           </td>
                         );
                       })}
@@ -507,9 +559,9 @@ export default function ClassroomPeriodMatrixModal({
         </div>
 
         {/* Modal Footer (Hidden on Print) */}
-        <div className="bg-slate-50 border-t border-slate-200 p-3 text-xs text-slate-500 flex items-center justify-between no-print">
+        <div className="bg-slate-50 border-t border-slate-200 p-3 text-xs text-slate-500 flex items-center justify-between no-print font-sans">
           <div>
-            💡 <strong className="text-slate-700">คำแนะนำ:</strong> จัดหน้ากระดาษแบบ A4 แนวตั้ง (Portrait) ตาราง 27 ห้องเรียนจะพอดีใน 1 หน้ากระดาษพอดี หรือกด "บันทึกเป็นรูปภาพ (PNG)" เพื่อแชร์ภาพได้ทันที
+            💡 <strong className="text-slate-700">คำแนะนำ:</strong> จัดหน้ากระดาษแบบ A4 แนวตั้ง (Portrait) ตาราง 27 ห้องเรียนจะพอดีใน 1 หน้ากระดาษพอดี หรือกด "บันทึกเป็นรูปภาพ (PNG)" เพื่อเซฟเป็นรูปภาพส่งไลน์ได้ทันที
           </div>
           <button
             type="button"
