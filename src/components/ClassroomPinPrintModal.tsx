@@ -145,7 +145,7 @@ export default function ClassroomPinPrintModal({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 5mm 6mm 5mm 6mm;
+            margin: 4mm 5mm 4mm 5mm;
           }
           html, body {
             background: white !important;
@@ -158,16 +158,16 @@ export default function ClassroomPinPrintModal({
           }
           .print-chunk-grid {
             display: grid !important;
-            grid-template-columns: repeat(2, 97mm) !important;
-            grid-auto-rows: 91mm !important;
-            column-gap: 4mm !important;
+            grid-template-columns: repeat(2, 98mm) !important;
+            grid-auto-rows: 89mm !important;
+            column-gap: 3mm !important;
             row-gap: 3mm !important;
             justify-content: center !important;
             align-content: start !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            height: 285mm !important;
-            max-height: 285mm !important;
+            height: 275mm !important;
+            max-height: 275mm !important;
             box-sizing: border-box !important;
           }
           .page-break-after-6 {
@@ -179,11 +179,11 @@ export default function ClassroomPinPrintModal({
             break-inside: avoid !important;
             border: 1.5px dashed #475569 !important;
             border-radius: 10px !important;
-            padding: 6px 8px !important;
+            padding: 5px 7px !important;
             background: white !important;
             box-shadow: none !important;
-            height: 91mm !important;
-            max-height: 91mm !important;
+            height: 89mm !important;
+            max-height: 89mm !important;
             box-sizing: border-box !important;
             display: flex !important;
             flex-direction: column !important;
@@ -372,7 +372,7 @@ export default function ClassroomPinPrintModal({
                             <img
                               src={checkQrDataUrl}
                               alt={`QR เช็คชื่อห้อง ${room.gradeRoom}`}
-                              className="w-16 h-16 object-contain"
+                              className="w-14 h-14 object-contain"
                             />
                           </div>
                           <span className="text-[7px] text-slate-400 mt-0.5 leading-tight line-clamp-1 font-mono">
@@ -390,7 +390,7 @@ export default function ClassroomPinPrintModal({
                             <img
                               src={guideQrDataUrl}
                               alt="QR คู่มือวิธีใช้งาน"
-                              className="w-16 h-16 object-contain"
+                              className="w-14 h-14 object-contain"
                             />
                           </div>
                           <span className="text-[7px] text-slate-400 mt-0.5 leading-tight line-clamp-1 font-mono">

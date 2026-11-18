@@ -57,6 +57,7 @@ import {
   formatThaiDateLong,
   isWithin7DaysThai,
 } from "@/lib/dateUtils";
+import { getSpecialNonCheckedPeriodInfo } from "@/lib/attendanceUtils";
 
 // Excluded non-academic activities, free periods, or tutorial periods that should NOT be checked:
 const EXCLUDED_ACTIVITY_KEYWORDS = [
@@ -1083,6 +1084,35 @@ export default function StudentCheckPage() {
 
   const currentRoom = classrooms.find((c) => c.id === selectedRoomId);
 
+  const currentDayOfWeek = useMemo(() => {
+    if (!checkDate) return 1;
+    const parts = checkDate.split("-").map(Number);
+    if (parts.length < 3 || isNaN(parts[0])) return 1;
+    return new Date(parts[0], parts[1] - 1, parts[2]).getDay();
+  }, [checkDate]);
+
+  const getPeriodSpecialInfo = (pNum: number) => {
+    if (!selectedRoomId || !currentRoom) return null;
+    const matchedTT = timetables.find(
+      (tt) =>
+        (tt.classroomId === selectedRoomId || tt.gradeRoom === currentRoom.gradeRoom) &&
+        tt.dayOfWeek === currentDayOfWeek &&
+        pNum >= tt.periodStart &&
+        pNum <= tt.periodEnd
+    );
+    return getSpecialNonCheckedPeriodInfo(
+      selectedRoomId,
+      currentRoom.gradeRoom,
+      currentDayOfWeek,
+      pNum,
+      matchedTT
+    );
+  };
+
+  const currentPeriodSpecialInfo = useMemo(() => {
+    return getPeriodSpecialInfo(periodStart);
+  }, [selectedRoomId, currentRoom, currentDayOfWeek, periodStart, timetables]);
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* SUBSTITUTE TEACHER ALERT POPUP MODAL */}
@@ -1558,6 +1588,31 @@ export default function StudentCheckPage() {
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {periods.filter((p) => p.periodNumber <= 4).map((p) => {
+                      const special = getPeriodSpecialInfo(p.periodNumber);
+                      if (special) {
+                        return (
+                          <div
+                            key={p.periodNumber}
+                            className="p-2.5 rounded-xl border border-slate-200 bg-slate-100/80 text-slate-400 text-center cursor-not-allowed select-none shadow-2xs"
+                            title={special.description}
+                          >
+                            <div className="text-xs font-bold text-slate-500 flex items-center justify-center gap-1">
+                              <span>คาบที่ {p.periodNumber}</span>
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold">
+                                [{special.label}]
+                              </span>
+                            </div>
+                            <div className="text-[10px] mt-0.5 text-slate-400 font-mono">
+                              {p.startTime} - {p.endTime}
+                            </div>
+                            <div className="mt-1">
+                              <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-200 text-slate-500">
+                                ไม่ต้องเช็ค
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
                       const isSelected = isDoublePeriod
                         ? p.periodNumber >= periodStart && p.periodNumber <= periodEnd
                         : p.periodNumber === periodStart;
@@ -1612,6 +1667,31 @@ export default function StudentCheckPage() {
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     {periods.filter((p) => p.periodNumber >= 5).map((p) => {
+                      const special = getPeriodSpecialInfo(p.periodNumber);
+                      if (special) {
+                        return (
+                          <div
+                            key={p.periodNumber}
+                            className="p-2.5 rounded-xl border border-slate-200 bg-slate-100/80 text-slate-400 text-center cursor-not-allowed select-none shadow-2xs"
+                            title={special.description}
+                          >
+                            <div className="text-xs font-bold text-slate-500 flex items-center justify-center gap-1">
+                              <span>คาบที่ {p.periodNumber}</span>
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold">
+                                [{special.label}]
+                              </span>
+                            </div>
+                            <div className="text-[10px] mt-0.5 text-slate-400 font-mono">
+                              {p.startTime} - {p.endTime}
+                            </div>
+                            <div className="mt-1">
+                              <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-200 text-slate-500">
+                                ไม่ต้องเช็ค
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
                       const isSelected = isDoublePeriod
                         ? p.periodNumber >= periodStart && p.periodNumber <= periodEnd
                         : p.periodNumber === periodStart;
@@ -1655,6 +1735,16 @@ export default function StudentCheckPage() {
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>
                     <strong>แจ้งเตือน:</strong> คาบที่ {periodStart} ในวันที่เลือกนี้ ได้ถูกบันทึกข้อมูลไว้แล้วในระบบ หากท่านกดบันทึก ข้อมูลใหม่จะถูกบันทึกทับ/อัปเดตรายการเดิม
+                  </span>
+                </div>
+              )}
+
+              {/* Special Activity / Free Period Notice (No Check Required) */}
+              {currentPeriodSpecialInfo && (
+                <div className="mt-3.5 p-3.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-700 text-xs flex items-center gap-2.5">
+                  <Lock className="w-4 h-4 text-slate-500 shrink-0" />
+                  <span>
+                    <strong>คาบที่ {periodStart} เป็น [{currentPeriodSpecialInfo.label}]:</strong> {currentPeriodSpecialInfo.description} &bull; โรงเรียนกำหนดให้นักเรียนไม่ต้องบันทึกเข้าสอนในคาบนี้
                   </span>
                 </div>
               )}
@@ -2011,24 +2101,35 @@ export default function StudentCheckPage() {
                   <span>ยกเลิกโหมดแก้ไข</span>
                 </button>
               )}
-              <button
-                type="submit"
-                disabled={submitting}
-                className={`w-full sm:w-auto px-8 py-3 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 active:scale-95 ${
-                  editingRecord
-                    ? "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-600/30 ml-auto"
-                    : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 shadow-sky-600/25 ml-auto"
-                }`}
-              >
-                {editingRecord ? <Edit3 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-                <span>
-                  {submitting
-                    ? "กำลังบันทึก..."
-                    : editingRecord
-                    ? "บันทึกการแก้ไขข้อมูล"
-                    : "ยืนยันบันทึกการเข้าสอน"}
-                </span>
-              </button>
+              {currentPeriodSpecialInfo ? (
+                <button
+                  type="button"
+                  disabled
+                  className="w-full sm:w-auto px-6 py-3 bg-slate-200 text-slate-500 font-bold rounded-xl cursor-not-allowed text-xs sm:text-sm ml-auto flex items-center justify-center gap-2"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>คาบนี้เป็น [{currentPeriodSpecialInfo.label}] &bull; โรงเรียนกำหนดไม่ต้องเช็คเข้าสอน</span>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className={`w-full sm:w-auto px-8 py-3 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 active:scale-95 ${
+                    editingRecord
+                      ? "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-amber-600/30 ml-auto"
+                      : "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 shadow-sky-600/25 ml-auto"
+                  }`}
+                >
+                  {editingRecord ? <Edit3 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                  <span>
+                    {submitting
+                      ? "กำลังบันทึก..."
+                      : editingRecord
+                      ? "บันทึกการแก้ไขข้อมูล"
+                      : "ยืนยันบันทึกการเข้าสอน"}
+                  </span>
+                </button>
+              )}
             </div>
           </form>
 

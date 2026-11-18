@@ -469,7 +469,13 @@ export async function getAttendanceLogs(termId?: string): Promise<AttendanceReco
         ? query(collection(db, "attendance_logs"), where("termId", "==", termId))
         : collection(db, "attendance_logs");
       const snapshot = await getDocs(q);
-      const list = snapshot.docs.map((d) => d.data() as AttendanceRecord);
+      const list = snapshot.docs.map((d) => {
+        const data = d.data() as AttendanceRecord;
+        return {
+          ...data,
+          id: d.id || data.id,
+        };
+      });
       list.sort(
         (a, b) =>
           (b.date || "").localeCompare(a.date || "") ||
@@ -567,7 +573,13 @@ export function subscribeAttendance(callback: (records: AttendanceRecord[]) => v
       unsubFirestore = onSnapshot(
         q,
         (snapshot) => {
-          const records = snapshot.docs.map((d) => d.data() as AttendanceRecord);
+          const records = snapshot.docs.map((d) => {
+            const data = d.data() as AttendanceRecord;
+            return {
+              ...data,
+              id: d.id || data.id,
+            };
+          });
           records.sort(
             (a, b) =>
               (b.date || "").localeCompare(a.date || "") ||

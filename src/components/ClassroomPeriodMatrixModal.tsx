@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Classroom, AttendanceRecord, SchoolProfile, TimetableEntry } from "@/types";
 import { formatThaiDateLong, formatThaiDateShort, getThaiDateString } from "@/lib/dateUtils";
+import { getSpecialNonCheckedPeriodInfo } from "@/lib/attendanceUtils";
 import { toPng } from "html-to-image";
 
 interface ClassroomPeriodMatrixModalProps {
@@ -72,7 +73,7 @@ export default function ClassroomPeriodMatrixModal({
       setIsExportingImage(true);
       // Ensure full scroll height and width are captured completely without viewport clipping
       const fullHeight = element.scrollHeight;
-      const fullWidth = element.scrollWidth;
+      const fullWidth = Math.max(element.scrollWidth, 980);
 
       const dataUrl = await toPng(element, {
         quality: 0.95,
@@ -81,6 +82,8 @@ export default function ClassroomPeriodMatrixModal({
         height: fullHeight,
         width: fullWidth,
         style: {
+          width: `${fullWidth}px`,
+          minWidth: `${fullWidth}px`,
           height: `${fullHeight}px`,
           maxHeight: "none",
           overflow: "visible",
@@ -155,70 +158,17 @@ export default function ClassroomPeriodMatrixModal({
     );
   };
 
-  // Identify special non-academic activity periods from timetable or school calendar schedule
-  const getSpecialActivityLabel = (
-    entry: TimetableEntry | undefined,
-    dOfWeek: number,
-    pNum: number,
-    grade: string
-  ): string | null => {
-    // 1. From timetable entry if present
-    if (entry) {
-      const name = entry.subjectName || "";
-      const code = entry.subjectCode || "";
-      const combined = `${name} ${code}`;
-
-      const activityKeywords = [
-        { kw: "ชุมนุม", label: "ชุมนุม" },
-        { kw: "ลูกเสือ", label: "ลูกเสือ" },
-        { kw: "เนตรนารี", label: "เนตรนารี" },
-        { kw: "ยุวกาชาด", label: "ยุวกาชาด" },
-        { kw: "พัฒนาทักษะชีวิต", label: "ทักษะชีวิต" },
-        { kw: "ทักษะชีวิต", label: "ทักษะชีวิต" },
-        { kw: "บำเพ็ญประโยชน์", label: "บำเพ็ญฯ" },
-        { kw: "บำเพ็ญ", label: "บำเพ็ญฯ" },
-        { kw: "ติว", label: "ติว O-NET" },
-        { kw: "โอเน็ต", label: "O-NET" },
-        { kw: "O-NET", label: "O-NET" },
-        { kw: "เลือกเสรี", label: "เลือกเสรี" },
-        { kw: "กิจกรรม", label: "กิจกรรม" },
-        { kw: "แนะแนว", label: "แนะแนว" },
-        { kw: "IS", label: "IS" },
-        { kw: "โฮมรูม", label: "โฮมรูม" },
-      ];
-
-      for (const item of activityKeywords) {
-        if (combined.includes(item.kw)) {
-          return item.label;
-        }
-      }
-
-      if (entry.teacherName === "ไม่ระบุ" || !code || code === "-") {
-        return name ? name.slice(0, 8) : "กิจกรรม";
+  // Count expected check-in periods for a classroom on the selected date (excluding activities and free periods)
+  const getExpectedPeriodCount = (clsId: string, gradeRoom: string): number => {
+    let count = 0;
+    for (let p = 1; p <= 7; p++) {
+      const tt = getTimetableEntry(clsId, gradeRoom, p, dayOfWeek);
+      const special = getSpecialNonCheckedPeriodInfo(clsId, gradeRoom, dayOfWeek, p, tt);
+      if (!special) {
+        count++;
       }
     }
-
-    // 2. School-wide standard activity periods (when no regular academic class in timetable)
-    // Wednesday (Day 3): Period 6 = ชุมนุม (ทุกระดับชั้น), Period 7 = ลูกเสือ/เนตรนารี (ม.ต้น) หรือ ทักษะชีวิต/บำเพ็ญฯ (ม.ปลาย)
-    if (dOfWeek === 3) {
-      if (pNum === 6) return "ชุมนุม";
-      if (pNum === 7) {
-        const isJunior = ["ม.1", "ม.2", "ม.3"].includes(grade);
-        return isJunior ? "ลูกเสือ" : "ทักษะชีวิต";
-      }
-    }
-
-    // Friday (Day 5): Period 1 = โฮมรูม (ถ้าไม่มีวิชาสอนในตาราง)
-    if (dOfWeek === 5 && pNum === 1 && !entry) {
-      return "โฮมรูม";
-    }
-
-    // Any unscheduled period 6 or 7 on any day is an activity period
-    if (!entry && (pNum === 6 || pNum === 7)) {
-      return "กิจกรรม";
-    }
-
-    return null;
+    return count > 0 ? count : 7;
   };
 
   // Overall Statistics for selected date
@@ -231,14 +181,15 @@ export default function ClassroomPeriodMatrixModal({
     sortedClassrooms.forEach((c) => {
       const roomMap = matrixMap.get(c.id);
       const count = roomMap ? roomMap.size : 0;
+      const expected = getExpectedPeriodCount(c.id, c.gradeRoom);
       totalCheckedPeriods += count;
-      if (count >= 7) fullyChecked++;
+      if (count >= expected) fullyChecked++;
       else if (count > 0) partiallyChecked++;
       else notChecked++;
     });
 
     return { fullyChecked, partiallyChecked, notChecked, totalCheckedPeriods };
-  }, [sortedClassrooms, matrixMap]);
+  }, [sortedClassrooms, matrixMap, dayOfWeek, timetable]);
 
   if (!isOpen) return null;
 
@@ -399,7 +350,7 @@ export default function ClassroomPeriodMatrixModal({
             <div className="flex items-center justify-between text-[10.5px] text-slate-700 font-bold px-1 mt-1 border-t pt-1 border-slate-200">
               <span>ประจำวัน: <strong>{thaiDateLabel}</strong> ({selectedDate})</span>
               <span className="text-[9px] text-slate-500 font-normal">
-                สัญลักษณ์: <span className="text-emerald-700 font-bold">● ตรงเวลา</span> &bull; <span className="text-amber-700 font-bold">▲ สาย</span> &bull; <span className="text-rose-700 font-bold">✕ ไม่เข้าสอน</span> &bull; <span className="border border-dashed border-slate-400 px-1 rounded text-slate-600 bg-white">รหัสวิชา ครู [รอเช็ค]</span> &bull; <span className="text-slate-500 font-medium bg-slate-100 px-1 rounded">[กิจกรรม]</span>
+                สัญลักษณ์: <span className="text-emerald-700 font-bold">● ตรงเวลา</span> &bull; <span className="text-amber-700 font-bold">▲ สาย</span> &bull; <span className="text-rose-700 font-bold">✕ ไม่เข้าสอน</span> &bull; <span className="border border-dashed border-slate-400 px-1 rounded text-slate-600 bg-white">รหัสวิชา ครู [รอเช็ค]</span> &bull; <span className="text-slate-600 font-medium bg-slate-100 px-1 rounded border border-slate-200">[กิจกรรม/คาบว่าง]</span>
               </span>
             </div>
           </div>
@@ -407,7 +358,7 @@ export default function ClassroomPeriodMatrixModal({
           {/* Quick Stats Pill (Hidden on Print) */}
           <div className="mb-2.5 grid grid-cols-4 gap-2 text-center text-xs no-print font-sans">
             <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-200">
-              <div className="text-[10px] text-emerald-800">เช็คครบ 7 คาบ</div>
+              <div className="text-[10px] text-emerald-800">เช็คครบทุกคาบ</div>
               <div className="text-base font-bold text-emerald-900">{stats.fullyChecked} ห้อง</div>
             </div>
             <div className="p-2 bg-amber-50 rounded-xl border border-amber-200">
@@ -460,7 +411,7 @@ export default function ClassroomPeriodMatrixModal({
                       {periods.map((pNum) => {
                         const rec = roomMap ? roomMap.get(pNum) : undefined;
                         const ttMatch = getTimetableEntry(cls.id, cls.gradeRoom, pNum, dayOfWeek);
-                        const specialActivity = getSpecialActivityLabel(ttMatch, dayOfWeek, pNum, cls.grade);
+                        const specialInfo = getSpecialNonCheckedPeriodInfo(cls.id, cls.gradeRoom, dayOfWeek, pNum, ttMatch);
 
                         // Case 1: Checked records (On Time, Late, Absent) with subject code + teacher first name
                         if (rec) {
@@ -517,16 +468,16 @@ export default function ClassroomPeriodMatrixModal({
                           );
                         }
 
-                        // Case 2: Special Activity (ชุมนุม, ลูกเสือ, ติว, etc. - ไม่ต้องเช็ค)
-                        if (specialActivity) {
+                        // Case 2: Special Activity or Free Period (ชุมนุม, ลูกเสือ, ผู้บำเพ็ญ, ทักษะชีวิต, ติว O-NET, เลือกเสรี, ซ่อมเสริม, คาบว่าง - ไม่ต้องเช็ค)
+                        if (specialInfo) {
                           return (
                             <td
                               key={pNum}
-                              className="p-1 border border-slate-300 bg-slate-100/90 text-slate-500 text-center font-medium"
-                              title={`${specialActivity} (คาบกิจกรรม/คาบแยกเรียน ไม่ต้องเช็คเวลา)`}
+                              className="p-1 border border-slate-300 bg-slate-100 text-slate-500 text-center font-medium"
+                              title={specialInfo.description}
                             >
-                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-600 font-semibold inline-block">
-                                [{specialActivity}]
+                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold inline-block">
+                                [{specialInfo.label}]
                               </span>
                             </td>
                           );
@@ -539,7 +490,7 @@ export default function ClassroomPeriodMatrixModal({
                           return (
                             <td
                               key={pNum}
-                              className="p-1 border border-slate-300 border-dashed bg-white text-slate-600 text-center font-normal"
+                              className="p-1 border border-slate-300 border-dashed bg-white text-slate-700 text-center font-normal"
                               title={`${ttMatch.teacherName} (${ttMatch.subjectCode}) - ยังไม่เช็ค`}
                             >
                               <span className="text-[8.5px] truncate max-w-[72px] inline-block opacity-85">
@@ -549,31 +500,37 @@ export default function ClassroomPeriodMatrixModal({
                           );
                         }
 
-                        // Case 4: Free period / No timetable entry
+                        // Case 4: Free period fallback
                         return (
                           <td
                             key={pNum}
-                            className="p-1 border border-slate-300 text-slate-300 bg-white text-center"
+                            className="p-1 border border-slate-300 bg-slate-100 text-slate-400 text-center"
                             title="คาบว่าง (ไม่มีในตารางสอน)"
                           >
-                            -
+                            <span className="text-[8px] text-slate-500">[คาบว่าง]</span>
                           </td>
                         );
                       })}
 
-                      <td className="p-1 border border-slate-300 font-bold text-center text-[10px] whitespace-nowrap">
-                        <span
-                          className={
-                            checkedCount === 7
-                              ? "text-emerald-700"
-                              : checkedCount > 0
-                              ? "text-amber-700"
-                              : "text-slate-400"
-                          }
-                        >
-                          {checkedCount}/7 คาบ
-                        </span>
-                      </td>
+                      {(() => {
+                        const expected = getExpectedPeriodCount(cls.id, cls.gradeRoom);
+                        const isComplete = checkedCount >= expected;
+                        return (
+                          <td className="p-1 border border-slate-300 font-bold text-center text-[10px] whitespace-nowrap">
+                            <span
+                              className={
+                                isComplete
+                                  ? "text-emerald-700"
+                                  : checkedCount > 0
+                                  ? "text-amber-700"
+                                  : "text-slate-400"
+                              }
+                            >
+                              {checkedCount}/{expected} คาบ
+                            </span>
+                          </td>
+                        );
+                      })()}
                     </tr>
                   );
                 })}
