@@ -177,14 +177,6 @@ export default function StatisticsPage() {
     let absentOther = 0;
 
     filteredRecords.forEach((r) => {
-      if (
-        r.status === "absent" &&
-        (r.absenceReason === "sick" ||
-          r.absenceReason === "personal" ||
-          r.absenceReason === "official")
-      ) {
-        return;
-      }
       const count = getEffectivePeriodCount(r, timetable);
       totalPeriods += count;
       if (r.status === "on_time") {

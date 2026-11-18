@@ -413,23 +413,30 @@ export default function ClassroomPeriodMatrixModal({
                         const ttMatch = getTimetableEntry(cls.id, cls.gradeRoom, pNum, dayOfWeek);
                         const specialInfo = getSpecialNonCheckedPeriodInfo(cls.id, cls.gradeRoom, dayOfWeek, pNum, ttMatch);
 
-                        // Case 1: Checked records (On Time, Late, Absent) with subject code + teacher first name
+                        // Case 1: Checked records (On Time, Late, Absent) with Line 1: Subject Code, Line 2: ครู[ชื่อครู]
                         if (rec) {
                           const teacherName = getTeacherFirstName(rec.teacherName);
-                          const label = `${rec.subjectCode || ""} ${teacherName}`.trim();
+                          const teacherLabel = teacherName ? `ครู${teacherName}` : "";
 
                           if (rec.status === "on_time") {
                             return (
                               <td
                                 key={pNum}
-                                className="p-1 border border-slate-300 bg-emerald-50 text-emerald-950 font-semibold"
+                                className="p-1 border border-slate-300 bg-emerald-50 text-emerald-950 font-semibold text-center"
                                 title={`${rec.teacherName} (${rec.subjectCode}) - ตรงเวลา`}
                               >
-                                <div className="flex items-center justify-center gap-0.5 leading-tight">
-                                  <span className="text-[9px] text-emerald-700 font-bold shrink-0">●</span>
-                                  <span className="text-[8.5px] truncate max-w-[72px]">
-                                    {label || "ตรงเวลา"}
-                                  </span>
+                                <div className="flex flex-col items-center justify-center leading-tight">
+                                  <div className="flex items-center justify-center gap-0.5 font-bold">
+                                    <span className="text-[8.5px] text-emerald-700 font-bold shrink-0">●</span>
+                                    <span className="text-[8.5px] font-bold tracking-tight truncate max-w-[72px]">
+                                      {rec.subjectCode || "ตรงเวลา"}
+                                    </span>
+                                  </div>
+                                  {teacherLabel && (
+                                    <div className="text-[8px] font-normal text-slate-700 truncate max-w-[72px] mt-0.5">
+                                      {teacherLabel}
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             );
@@ -439,14 +446,21 @@ export default function ClassroomPeriodMatrixModal({
                             return (
                               <td
                                 key={pNum}
-                                className="p-1 border border-slate-300 bg-amber-50 text-amber-950 font-semibold"
+                                className="p-1 border border-slate-300 bg-amber-50 text-amber-950 font-semibold text-center"
                                 title={`${rec.teacherName} (${rec.subjectCode}) - เข้าสอนสาย`}
                               >
-                                <div className="flex items-center justify-center gap-0.5 leading-tight">
-                                  <span className="text-[9px] text-amber-700 font-bold shrink-0">▲</span>
-                                  <span className="text-[8.5px] truncate max-w-[72px]">
-                                    {label || "สาย"}
-                                  </span>
+                                <div className="flex flex-col items-center justify-center leading-tight">
+                                  <div className="flex items-center justify-center gap-0.5 font-bold">
+                                    <span className="text-[8.5px] text-amber-700 font-bold shrink-0">▲</span>
+                                    <span className="text-[8.5px] font-bold tracking-tight truncate max-w-[72px]">
+                                      {rec.subjectCode || "สาย"}
+                                    </span>
+                                  </div>
+                                  {teacherLabel && (
+                                    <div className="text-[8px] font-normal text-slate-700 truncate max-w-[72px] mt-0.5">
+                                      {teacherLabel}
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             );
@@ -455,14 +469,21 @@ export default function ClassroomPeriodMatrixModal({
                           return (
                             <td
                               key={pNum}
-                              className="p-1 border border-slate-300 bg-rose-50 text-rose-950 font-bold"
-                              title={`${rec.teacherName} (${rec.subjectCode}) - ไม่เข้าสอน: ${rec.absenceReason || ""}`}
+                              className="p-1 border border-slate-300 bg-rose-50 text-rose-950 font-bold text-center"
+                              title={`${rec.teacherName} (${rec.subjectCode}) - ไม่เข้าสอน: ${rec.absenceNote || rec.absenceReason || ""}`}
                             >
-                              <div className="flex items-center justify-center gap-0.5 leading-tight">
-                                <span className="text-[9px] text-rose-600 font-bold shrink-0">✕</span>
-                                <span className="text-[8.5px] truncate max-w-[72px]">
-                                  {label || "ไม่เข้า"}
-                                </span>
+                              <div className="flex flex-col items-center justify-center leading-tight">
+                                <div className="flex items-center justify-center gap-0.5 font-bold">
+                                  <span className="text-[8.5px] text-rose-600 font-bold shrink-0">✕</span>
+                                  <span className="text-[8.5px] font-bold tracking-tight truncate max-w-[72px]">
+                                    {rec.subjectCode || "ไม่เข้า"}
+                                  </span>
+                                </div>
+                                {teacherLabel && (
+                                  <div className="text-[8px] font-normal text-slate-700 truncate max-w-[72px] mt-0.5">
+                                    {teacherLabel}
+                                  </div>
+                                )}
                               </div>
                             </td>
                           );
@@ -486,16 +507,23 @@ export default function ClassroomPeriodMatrixModal({
                         // Case 3: Unchecked period but has scheduled class in timetable (white bg, dashed border, slate text)
                         if (ttMatch && (ttMatch.subjectCode || ttMatch.teacherName)) {
                           const teacherName = getTeacherFirstName(ttMatch.teacherName);
-                          const label = `${ttMatch.subjectCode || ""} ${teacherName}`.trim();
+                          const teacherLabel = teacherName ? `ครู${teacherName}` : "";
                           return (
                             <td
                               key={pNum}
                               className="p-1 border border-slate-300 border-dashed bg-white text-slate-700 text-center font-normal"
                               title={`${ttMatch.teacherName} (${ttMatch.subjectCode}) - ยังไม่เช็ค`}
                             >
-                              <span className="text-[8.5px] truncate max-w-[72px] inline-block opacity-85">
-                                {label}
-                              </span>
+                              <div className="flex flex-col items-center justify-center leading-tight opacity-85">
+                                <span className="text-[8.5px] font-bold text-slate-800 tracking-tight truncate max-w-[72px]">
+                                  {ttMatch.subjectCode}
+                                </span>
+                                {teacherLabel && (
+                                  <span className="text-[8px] text-slate-600 truncate max-w-[72px] mt-0.5">
+                                    {teacherLabel}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                           );
                         }

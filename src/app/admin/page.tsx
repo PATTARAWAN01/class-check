@@ -2100,21 +2100,26 @@ export default function AdminPage() {
                               <div className="space-y-0.5">
                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-800">
                                   <XCircle className="w-3 h-3 text-rose-600" />
-                                  ไม่เข้าสอน (
-                                  {log.absenceReason === "meeting"
-                                    ? "ประชุม"
-                                    : log.absenceReason === "activity"
-                                    ? "กิจกรรมสำคัญ"
-                                    : log.absenceReason === "official"
-                                    ? "ไปราชการ"
-                                    : log.absenceReason === "personal"
-                                    ? "ลากิจ"
-                                    : log.absenceReason === "sick"
-                                    ? "ลาป่วย"
-                                    : log.absenceNote || "เหตุผลอื่นๆ"}
-                                  )
+                                  ไม่เข้าสอน
+                                  {log.absenceNote
+                                    ? ` (${log.absenceNote})`
+                                    : log.absenceReason
+                                    ? ` (${
+                                        log.absenceReason === "meeting"
+                                          ? "ประชุม"
+                                          : log.absenceReason === "activity"
+                                          ? "กิจกรรมสำคัญ"
+                                          : log.absenceReason === "official"
+                                          ? "ไปราชการ"
+                                          : log.absenceReason === "personal"
+                                          ? "ลากิจ"
+                                          : log.absenceReason === "sick"
+                                          ? "ลาป่วย"
+                                          : "เหตุผลอื่นๆ"
+                                      })`
+                                    : ""}
                                 </span>
-                                {log.absenceNote && (
+                                {log.absenceNote && log.absenceReason && log.absenceReason !== "other" && (
                                   <div className="text-[10px] text-rose-700 italic">
                                     หมายเหตุ: {log.absenceNote}
                                   </div>

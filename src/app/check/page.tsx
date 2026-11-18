@@ -895,12 +895,8 @@ export default function StudentCheckPage() {
       alert("กรุณาเลือกสถานะการเข้าสอน (เข้าสอนตรงเวลา / สาย / ไม่เข้าสอน)");
       return;
     }
-    if (status === "absent" && !absenceReason) {
-      alert("กรณีไม่เข้าสอน กรุณาระบุสาเหตุ (ประชุม / ร่วมกิจกรรมสำคัญ / เหตุผลอื่นๆ)");
-      return;
-    }
-    if (status === "absent" && absenceReason === "other" && !absenceNote.trim()) {
-      alert("กรุณาพิมพ์ตอบระบุสาเหตุในช่องข้อความ");
+    if (status === "absent" && !absenceNote.trim()) {
+      alert("กรณีครูไม่เข้าสอน กรุณาพิมพ์ระบุเหตุผลในช่องข้อความ");
       return;
     }
 
@@ -991,11 +987,11 @@ export default function StudentCheckPage() {
             newValue: newTeacherName,
           });
         }
-        if (status === "absent" && editingRecord.absenceReason !== absenceReason) {
+        if (status === "absent" && editingRecord.absenceNote !== absenceNote.trim()) {
           changes.push({
-            field: "สาเหตุการไม่เข้าสอน",
-            oldValue: editingRecord.absenceReason || "-",
-            newValue: (absenceReason as string) || "-",
+            field: "เหตุผลการไม่เข้าสอน",
+            oldValue: editingRecord.absenceNote || "-",
+            newValue: absenceNote.trim(),
           });
         }
 
@@ -2023,68 +2019,27 @@ export default function StudentCheckPage() {
                 </label>
               </div>
 
-              {/* Sub-form: Absence Reason */}
+              {/* Sub-form: Mandatory Typed Absence Reason */}
               {status === "absent" && (
-                <div className="mt-4 p-4 rounded-xl bg-rose-50/70 border-2 border-rose-300 space-y-3 animate-in fade-in duration-200">
-                  <label className="block text-xs font-bold text-rose-950 uppercase tracking-wider">
-                    ระบุสาเหตุที่ครูไม่เข้าสอน <span className="text-rose-600">*</span>
+                <div className="mt-4 p-4 rounded-xl bg-rose-50/70 border-2 border-rose-300 space-y-2 animate-in fade-in duration-200">
+                  <label className="block text-xs font-bold text-rose-950 uppercase tracking-wider flex items-center justify-between">
+                    <span>ระบุเหตุผลที่ครูไม่เข้าสอน <span className="text-rose-600">* (จำเป็นต้องระบุ)</span></span>
                   </label>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    {[
-                      { id: "meeting", label: "ประชุม" },
-                      {
-                        id: "activity",
-                        label: "เข้าร่วมกิจกรรมสำคัญของโรงเรียน",
-                      },
-                      { id: "other", label: "เหตุผลอื่นๆ" },
-                    ].map((reason) => {
-                      const isChosen = absenceReason === reason.id;
-                      return (
-                        <label
-                          key={reason.id}
-                          className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs cursor-pointer transition-all ${
-                            isChosen
-                              ? "bg-rose-700 text-white border-2 border-rose-800 shadow-md ring-2 ring-rose-400 font-bold scale-[1.02]"
-                              : absenceReason !== ""
-                              ? "bg-white/60 text-slate-500 border-rose-200 opacity-60 hover:opacity-90"
-                              : "bg-white text-slate-700 border-rose-200 hover:bg-rose-100/50 font-medium"
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="absence_reason"
-                            value={reason.id}
-                            checked={isChosen}
-                            onChange={() => setAbsenceReason(reason.id as AbsenceReason)}
-                            className="sr-only"
-                          />
-                          <span>{reason.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  {/* Other Note Input */}
-                  {absenceReason === "other" && (
-                    <div className="mt-2 space-y-1">
-                      <span className="block text-xs font-bold text-rose-900">
-                        พิมพ์ระบุสาเหตุอื่นๆ:
-                      </span>
-                      <input
-                        type="text"
-                        value={absenceNote}
-                        onChange={(e) => setAbsenceNote(e.target.value)}
-                        placeholder="พิมพ์ระบุสาเหตุเพิ่มเติมที่นี่..."
-                        className={`w-full px-3.5 py-2.5 rounded-xl border text-xs text-slate-800 transition-all ${
-                          absenceNote.trim()
-                            ? "border-2 border-rose-600 bg-white font-bold"
-                            : "border-rose-300 bg-white focus:ring-2 focus:ring-rose-500"
-                        }`}
-                        required
-                      />
-                    </div>
-                  )}
+                  <input
+                    type="text"
+                    value={absenceNote}
+                    onChange={(e) => setAbsenceNote(e.target.value)}
+                    placeholder="พิมพ์ระบุเหตุผล เช่น ไปราชการ, ติดภารกิจ, ซื้อของให้โรงเรียน..."
+                    className={`w-full px-4 py-3 rounded-xl border text-sm text-slate-800 transition-all ${
+                      absenceNote.trim()
+                        ? "border-2 border-rose-600 bg-white font-semibold shadow-xs"
+                        : "border-rose-300 bg-white focus:ring-2 focus:ring-rose-500"
+                    }`}
+                    required
+                  />
+                  <p className="text-[11px] text-rose-700">
+                    * กรุณาพิมพ์ระบุเหตุผลหรือภารกิจที่ครูไม่สามารถเข้าสอนในคาบนี้ให้ชัดเจน
+                  </p>
                 </div>
               )}
             </div>

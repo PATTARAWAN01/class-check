@@ -42,7 +42,7 @@ export default function OfficialPdfReport({
   let absentActivity = 0;
   let absentOther = 0;
 
-  // List of other notes
+  // List of all absence notes for summary
   const allOtherNotes: {
     teacherName: string;
     gradeRoom: string;
@@ -52,16 +52,6 @@ export default function OfficialPdfReport({
   }[] = [];
 
   cleanRecords.forEach((r) => {
-    // If it was a leave record (sick, personal, official), ignore because substitute taught it
-    if (
-      r.status === "absent" &&
-      (r.absenceReason === "sick" ||
-        r.absenceReason === "personal" ||
-        r.absenceReason === "official")
-    ) {
-      return;
-    }
-
     const count = getEffectivePeriodCount(r, timetable);
     totalPeriods += count;
     if (r.status === "on_time") onTimePeriods += count;
@@ -70,18 +60,24 @@ export default function OfficialPdfReport({
       absentPeriods += count;
       if (r.absenceReason === "meeting") absentMeeting += count;
       else if (r.absenceReason === "activity") absentActivity += count;
-      else {
-        absentOther += count;
-        if (r.absenceNote && r.absenceNote.trim()) {
-          allOtherNotes.push({
-            teacherName: r.teacherName,
-            gradeRoom: r.gradeRoom,
-            subject: r.subjectName || r.subjectCode,
-            date: r.date,
-            note: r.absenceNote.trim(),
-          });
-        }
-      }
+      else absentOther += count;
+
+      const noteText = (r.absenceNote && r.absenceNote.trim()) || (
+        r.absenceReason === "meeting" ? "ประชุม" :
+        r.absenceReason === "activity" ? "เข้าร่วมกิจกรรมของโรงเรียน" :
+        r.absenceReason === "sick" ? "ลาป่วย" :
+        r.absenceReason === "personal" ? "ลากิจ" :
+        r.absenceReason === "official" ? "ไปราชการ" :
+        "ไม่ระบุเหตุผล"
+      );
+
+      allOtherNotes.push({
+        teacherName: r.teacherName,
+        gradeRoom: r.gradeRoom,
+        subject: r.subjectName || r.subjectCode,
+        date: r.date,
+        note: noteText,
+      });
     }
   });
 
@@ -111,17 +107,9 @@ export default function OfficialPdfReport({
         let tMeeting = 0;
         let tActivity = 0;
         let tOther = 0;
-        const tOtherNotes: string[] = [];
+        const tAbsentNotes: string[] = [];
 
         tRecords.forEach((r) => {
-          if (
-            r.status === "absent" &&
-            (r.absenceReason === "sick" ||
-              r.absenceReason === "personal" ||
-              r.absenceReason === "official")
-          ) {
-            return;
-          }
           const count = getEffectivePeriodCount(r, timetable);
           tTotal += count;
           if (r.status === "on_time") tOnTime += count;
@@ -130,12 +118,20 @@ export default function OfficialPdfReport({
             tAbsent += count;
             if (r.absenceReason === "meeting") tMeeting += count;
             else if (r.absenceReason === "activity") tActivity += count;
-            else {
-              tOther += count;
-              if (r.absenceNote && r.absenceNote.trim()) {
-                tOtherNotes.push(r.absenceNote.trim());
-              }
-            }
+            else tOther += count;
+
+            const noteText = (r.absenceNote && r.absenceNote.trim()) || (
+              r.absenceReason === "meeting" ? "ประชุม" :
+              r.absenceReason === "activity" ? "เข้าร่วมกิจกรรมของโรงเรียน" :
+              r.absenceReason === "sick" ? "ลาป่วย" :
+              r.absenceReason === "personal" ? "ลากิจ" :
+              r.absenceReason === "official" ? "ไปราชการ" :
+              "ไม่ระบุเหตุผล"
+            );
+
+            tAbsentNotes.push(
+              r.gradeRoom ? `${noteText} (${r.gradeRoom})` : noteText
+            );
           }
         });
 
@@ -154,14 +150,14 @@ export default function OfficialPdfReport({
           meeting: tMeeting,
           activity: tActivity,
           other: tOther,
-          otherNotes: Array.from(new Set(tOtherNotes)),
+          absentNotes: Array.from(new Set(tAbsentNotes)),
           rate,
         };
       })
       .sort((a, b) =>
         a.teacher.code.localeCompare(b.teacher.code, undefined, { numeric: true })
       );
-  }, [teacher, teachers, records]);
+  }, [teacher, teachers, cleanRecords, timetable]);
 
   const pdfFileName = teacher
     ? `รายงานการเข้าสอน_${teacher.fullName.replace(/\s+/g, "_")}_${getThaiDateString()}`
@@ -412,9 +408,7 @@ export default function OfficialPdfReport({
                 </div>
                 {absentPeriods > 0 && (
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-slate-600 font-medium">
-                    <span>&bull; ประชุม: <strong className="text-slate-900">{absentMeeting}</strong></span>
-                    <span>&bull; กิจกรรมสำคัญ: <strong className="text-slate-900">{absentActivity}</strong></span>
-                    <span>&bull; อื่นๆ: <strong className="text-slate-900">{absentOther}</strong></span>
+                    <span>&bull; ไม่เข้าสอน: <strong className="text-rose-900 font-bold">{absentPeriods} คาบ</strong> (ระบุเหตุผลครบทุกรายการ)</span>
                   </div>
                 )}
               </div>
@@ -448,9 +442,7 @@ export default function OfficialPdfReport({
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-9 print:w-7 text-center whitespace-nowrap text-emerald-800">ตรงเวลา</th>
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-8 print:w-6 text-center whitespace-nowrap text-amber-800">สาย</th>
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-10 print:w-8 text-center whitespace-nowrap text-rose-800 font-bold">ไม่เข้าสอน</th>
-                    <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-8 print:w-6 text-center whitespace-nowrap text-slate-700">ประชุม</th>
-                    <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-8 print:w-6 text-center whitespace-nowrap text-slate-700">กิจกรรม</th>
-                    <th className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-left whitespace-nowrap text-slate-700">อื่นๆ/เหตุผล</th>
+                    <th className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-left whitespace-nowrap text-slate-700">เหตุผลการไม่เข้าสอน</th>
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-11 print:w-9 text-center whitespace-nowrap font-bold text-slate-900">ร้อยละเข้า</th>
                   </tr>
                 </thead>
@@ -474,24 +466,13 @@ export default function OfficialPdfReport({
                         {ts.late}
                       </td>
                       <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-center text-rose-700 font-bold">
-                        {ts.absent}
-                      </td>
-                      <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-center text-slate-600">
-                        {ts.meeting > 0 ? ts.meeting : "-"}
-                      </td>
-                      <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-center text-slate-600">
-                        {ts.activity > 0 ? ts.activity : "-"}
+                        {ts.absent > 0 ? ts.absent : "-"}
                       </td>
                       <td className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-slate-700">
-                        {ts.other > 0 ? (
-                          <div className="flex items-center gap-1">
-                            <span className="font-bold text-rose-700">{ts.other}</span>
-                            {ts.otherNotes.length > 0 && (
-                              <span className="text-[9px] print:text-[5.8pt] text-slate-600 truncate max-w-[180px] print:max-w-[160px] inline-block">
-                                ({ts.otherNotes.slice(0, 2).join(", ")})
-                              </span>
-                            )}
-                          </div>
+                        {ts.absentNotes.length > 0 ? (
+                          <span className="text-[9px] print:text-[5.8pt] text-rose-950 font-medium">
+                            {ts.absentNotes.join(", ")}
+                          </span>
                         ) : (
                           <div className="text-center text-slate-400">-</div>
                         )}
@@ -511,9 +492,9 @@ export default function OfficialPdfReport({
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-emerald-800">{onTimePeriods}</td>
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-amber-800">{latePeriods}</td>
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-rose-800 font-bold">{absentPeriods}</td>
-                    <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5">{absentMeeting > 0 ? absentMeeting : "-"}</td>
-                    <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5">{absentActivity > 0 ? absentActivity : "-"}</td>
-                    <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5">{absentOther > 0 ? absentOther : "-"}</td>
+                    <td className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-left text-slate-700">
+                      {allOtherNotes.length > 0 ? `รวมระบุเหตุผล ${allOtherNotes.length} รายการ` : "-"}
+                    </td>
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-sky-900">{overallRate}%</td>
                   </tr>
                 </tbody>
@@ -523,14 +504,14 @@ export default function OfficialPdfReport({
               {allOtherNotes.length > 0 && (
                 <div className="mt-2.5 print:mt-1 p-2 print:p-1 bg-slate-50 border border-slate-300 rounded-lg text-xs print:text-[5.8pt] print:leading-tight break-inside-avoid">
                   <div className="font-bold text-slate-900 mb-0.5 flex items-center gap-1">
-                    <span>📌 สรุปเหตุผลการไม่เข้าสอนที่ระบุเพิ่มเติม ({allOtherNotes.length} รายการ):</span>
+                    <span>📌 สรุปเหตุผลการไม่เข้าสอนที่ระบุทั้งหมด ({allOtherNotes.length} รายการ):</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-slate-700">
                     {allOtherNotes.map((item, i) => (
                       <div key={i} className="flex items-start gap-1">
                         <span className="text-slate-400">&bull;</span>
                         <span className="truncate">
-                          <strong>{item.teacherName}</strong> ({item.gradeRoom}):{" "}
+                          <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}):{" "}
                           <span className="font-medium text-rose-900 bg-rose-50 px-0.5 rounded">{item.note}</span>
                         </span>
                       </div>
