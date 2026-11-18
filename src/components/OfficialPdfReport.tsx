@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import { Printer, X, Image as ImageIcon, Loader2 } from "lucide-react";
-import { AcademicTerm, AttendanceRecord, SchoolProfile, Teacher } from "@/types";
+import { AcademicTerm, AttendanceRecord, SchoolProfile, Teacher, TimetableEntry } from "@/types";
 import { getThaiDateString, formatThaiDateShort } from "@/lib/dateUtils";
+import { getEffectivePeriodCount, deduplicateAttendanceRecords } from "@/lib/attendanceUtils";
 import { toPng } from "html-to-image";
 
 interface OfficialPdfReportProps {
@@ -11,6 +12,7 @@ interface OfficialPdfReportProps {
   term: AcademicTerm | null;
   teacher: Teacher | null; // null = all teachers summary
   teachers?: Teacher[]; // All teachers list for overview report
+  timetable?: TimetableEntry[];
   records: AttendanceRecord[];
   dateRangeLabel: string;
   onClose: () => void;
@@ -21,11 +23,15 @@ export default function OfficialPdfReport({
   term,
   teacher,
   teachers = [],
+  timetable = [],
   records,
   dateRangeLabel,
   onClose,
 }: OfficialPdfReportProps) {
   const [isExportingImage, setIsExportingImage] = useState(false);
+
+  // Clean and deduplicate records to eliminate accidental duplicate check-ins
+  const cleanRecords = useMemo(() => deduplicateAttendanceRecords(records), [records]);
 
   // Aggregate statistics for this report
   let totalPeriods = 0;
@@ -45,7 +51,7 @@ export default function OfficialPdfReport({
     note: string;
   }[] = [];
 
-  records.forEach((r) => {
+  cleanRecords.forEach((r) => {
     // If it was a leave record (sick, personal, official), ignore because substitute taught it
     if (
       r.status === "absent" &&
@@ -56,7 +62,7 @@ export default function OfficialPdfReport({
       return;
     }
 
-    const count = r.periodCount || 1;
+    const count = getEffectivePeriodCount(r, timetable);
     totalPeriods += count;
     if (r.status === "on_time") onTimePeriods += count;
     else if (r.status === "late") latePeriods += count;
@@ -95,7 +101,7 @@ export default function OfficialPdfReport({
     if (teacher || !teachers.length) return [];
     return teachers
       .map((t) => {
-        const tRecords = records.filter(
+        const tRecords = cleanRecords.filter(
           (r) => r.teacherId === t.id || r.teacherName.includes(t.fullName)
         );
         let tTotal = 0;
@@ -116,7 +122,7 @@ export default function OfficialPdfReport({
           ) {
             return;
           }
-          const count = r.periodCount || 1;
+          const count = getEffectivePeriodCount(r, timetable);
           tTotal += count;
           if (r.status === "on_time") tOnTime += count;
           else if (r.status === "late") tLate += count;

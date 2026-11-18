@@ -155,38 +155,67 @@ export default function ClassroomPeriodMatrixModal({
     );
   };
 
-  // Identify special non-academic activity periods from timetable
-  const getSpecialActivityLabel = (entry?: TimetableEntry): string | null => {
-    if (!entry) return null;
-    const name = entry.subjectName || "";
-    const code = entry.subjectCode || "";
-    const combined = `${name} ${code}`;
+  // Identify special non-academic activity periods from timetable or school calendar schedule
+  const getSpecialActivityLabel = (
+    entry: TimetableEntry | undefined,
+    dOfWeek: number,
+    pNum: number,
+    grade: string
+  ): string | null => {
+    // 1. From timetable entry if present
+    if (entry) {
+      const name = entry.subjectName || "";
+      const code = entry.subjectCode || "";
+      const combined = `${name} ${code}`;
 
-    const activityKeywords = [
-      { kw: "ชุมนุม", label: "ชุมนุม" },
-      { kw: "ลูกเสือ", label: "ลูกเสือ" },
-      { kw: "เนตรนารี", label: "เนตรนารี" },
-      { kw: "ยุวกาชาด", label: "ยุวกาชาด" },
-      { kw: "พัฒนาทักษะชีวิต", label: "ทักษะชีวิต" },
-      { kw: "บำเพ็ญประโยชน์", label: "บำเพ็ญฯ" },
-      { kw: "ติว", label: "ติว" },
-      { kw: "โอเน็ต", label: "O-NET" },
-      { kw: "O-NET", label: "O-NET" },
-      { kw: "เลือกเสรี", label: "เลือกเสรี" },
-      { kw: "กิจกรรม", label: "กิจกรรม" },
-      { kw: "แนะแนว", label: "แนะแนว" },
-      { kw: "IS", label: "IS" },
-      { kw: "โฮมรูม", label: "โฮมรูม" },
-    ];
+      const activityKeywords = [
+        { kw: "ชุมนุม", label: "ชุมนุม" },
+        { kw: "ลูกเสือ", label: "ลูกเสือ" },
+        { kw: "เนตรนารี", label: "เนตรนารี" },
+        { kw: "ยุวกาชาด", label: "ยุวกาชาด" },
+        { kw: "พัฒนาทักษะชีวิต", label: "ทักษะชีวิต" },
+        { kw: "ทักษะชีวิต", label: "ทักษะชีวิต" },
+        { kw: "บำเพ็ญประโยชน์", label: "บำเพ็ญฯ" },
+        { kw: "บำเพ็ญ", label: "บำเพ็ญฯ" },
+        { kw: "ติว", label: "ติว O-NET" },
+        { kw: "โอเน็ต", label: "O-NET" },
+        { kw: "O-NET", label: "O-NET" },
+        { kw: "เลือกเสรี", label: "เลือกเสรี" },
+        { kw: "กิจกรรม", label: "กิจกรรม" },
+        { kw: "แนะแนว", label: "แนะแนว" },
+        { kw: "IS", label: "IS" },
+        { kw: "โฮมรูม", label: "โฮมรูม" },
+      ];
 
-    for (const item of activityKeywords) {
-      if (combined.includes(item.kw)) {
-        return item.label;
+      for (const item of activityKeywords) {
+        if (combined.includes(item.kw)) {
+          return item.label;
+        }
+      }
+
+      if (entry.teacherName === "ไม่ระบุ" || !code || code === "-") {
+        return name ? name.slice(0, 8) : "กิจกรรม";
       }
     }
 
-    if (entry.teacherName === "ไม่ระบุ" || !code || code === "-") {
-      return name ? name.slice(0, 8) : "กิจกรรม";
+    // 2. School-wide standard activity periods (when no regular academic class in timetable)
+    // Wednesday (Day 3): Period 6 = ชุมนุม (ทุกระดับชั้น), Period 7 = ลูกเสือ/เนตรนารี (ม.ต้น) หรือ ทักษะชีวิต/บำเพ็ญฯ (ม.ปลาย)
+    if (dOfWeek === 3) {
+      if (pNum === 6) return "ชุมนุม";
+      if (pNum === 7) {
+        const isJunior = ["ม.1", "ม.2", "ม.3"].includes(grade);
+        return isJunior ? "ลูกเสือ" : "ทักษะชีวิต";
+      }
+    }
+
+    // Friday (Day 5): Period 1 = โฮมรูม (ถ้าไม่มีวิชาสอนในตาราง)
+    if (dOfWeek === 5 && pNum === 1 && !entry) {
+      return "โฮมรูม";
+    }
+
+    // Any unscheduled period 6 or 7 on any day is an activity period
+    if (!entry && (pNum === 6 || pNum === 7)) {
+      return "กิจกรรม";
     }
 
     return null;
@@ -431,7 +460,7 @@ export default function ClassroomPeriodMatrixModal({
                       {periods.map((pNum) => {
                         const rec = roomMap ? roomMap.get(pNum) : undefined;
                         const ttMatch = getTimetableEntry(cls.id, cls.gradeRoom, pNum, dayOfWeek);
-                        const specialActivity = getSpecialActivityLabel(ttMatch);
+                        const specialActivity = getSpecialActivityLabel(ttMatch, dayOfWeek, pNum, cls.grade);
 
                         // Case 1: Checked records (On Time, Late, Absent) with subject code + teacher first name
                         if (rec) {

@@ -106,6 +106,7 @@ import ClassroomPeriodMatrixModal from "@/components/ClassroomPeriodMatrixModal"
 import SubstituteExcelImporter from "@/components/SubstituteExcelImporter";
 import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
 import { generateSecurePin } from "@/lib/pinUtils";
+import { getEffectivePeriodCount, deduplicateAttendanceRecords } from "@/lib/attendanceUtils";
 
 type AdminTab =
   | "reports"
@@ -460,6 +461,85 @@ export default function AdminPage() {
     }
   };
 
+  const handleAutoCleanAndRepairLogs = async () => {
+    if (
+      !window.confirm(
+        "ระบบจะทำการตรวจสอบรายการบันทึกทั้งหมดเพื่อ:\n1. ปรับปรุงคาบเรียนที่บันทึกเป็นคาบคู่ผิดพลาด ให้กลับมาเป็น 1 คาบตามตารางสอนจริง (แก้ไขปัญหาคาบรวมเกินจริง)\n2. ลบรายการที่นักเรียนบันทึกซ้ำซ้อนในห้องและคาบเดียวกันออกจากระบบ\n\nต้องการดำเนินการทันทีหรือไม่?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+      let repairedCount = 0;
+      let deletedDuplicates = 0;
+
+      // Group records by classroomId + date
+      const roomDateGroups = new Map<string, AttendanceRecord[]>();
+      attendanceLogs.forEach((r) => {
+        const key = `${r.classroomId}_${r.date}`;
+        if (!roomDateGroups.has(key)) roomDateGroups.set(key, []);
+        roomDateGroups.get(key)!.push(r);
+      });
+
+      // 1. Process duplicates and repair erroneous periods
+      for (const records of Array.from(roomDateGroups.values())) {
+        // Sort descending (newest first)
+        const sorted = [...records].sort((a, b) => {
+          const timeA = a.updatedAt || a.createdAt || "";
+          const timeB = b.updatedAt || b.createdAt || "";
+          return timeB.localeCompare(timeA);
+        });
+
+        const occupied = new Set<number>();
+        for (const r of sorted) {
+          const pStart = r.periodStart || 1;
+          const pEnd = r.periodEnd || pStart;
+          let isDup = false;
+          for (let p = pStart; p <= pEnd; p++) {
+            if (occupied.has(p)) {
+              isDup = true;
+              break;
+            }
+          }
+
+          if (isDup) {
+            await deleteAttendanceLog(r.id);
+            deletedDuplicates++;
+          } else {
+            for (let p = pStart; p <= pEnd; p++) {
+              occupied.add(p);
+            }
+
+            // Check if periodCount or periodEnd is erroneous
+            const effectiveCount = getEffectivePeriodCount(r, timetable);
+            if (
+              r.periodCount !== effectiveCount ||
+              (effectiveCount === 1 && r.periodEnd !== r.periodStart)
+            ) {
+              const fixed: AttendanceRecord = {
+                ...r,
+                periodCount: effectiveCount,
+                periodEnd: effectiveCount === 1 ? r.periodStart : r.periodEnd,
+                updatedAt: new Date().toISOString(),
+              };
+              await updateAttendanceLog(fixed);
+              repairedCount++;
+            }
+          }
+        }
+      }
+
+      showNotice(
+        `ประมวลผลสำเร็จ: ซ่อมแซมคาบเรียนที่ผิดพลาด ${repairedCount} รายการ และลบรายการซ้ำซ้อน ${deletedDuplicates} รายการ`,
+        "success"
+      );
+    } catch (e) {
+      console.error("Clean logs error:", e);
+      showNotice("เกิดข้อผิดพลาดในการตรวจสอบและทำความสะอาดข้อมูล", "error");
+    }
+  };
+
   const handleSaveEditLog = async (updated: AttendanceRecord) => {
     try {
       const original = attendanceLogs.find((r) => r.id === updated.id);
@@ -553,7 +633,7 @@ export default function AdminPage() {
     let late = 0;
     let absent = 0;
     filteredAdminAttendance.forEach((r) => {
-      const cnt = r.periodCount || 1;
+      const cnt = getEffectivePeriodCount(r, timetable);
       total += cnt;
       if (r.status === "on_time") onTime += cnt;
       else if (r.status === "late") late += cnt;
@@ -563,7 +643,7 @@ export default function AdminPage() {
     const latePct = total > 0 ? Math.round((late / total) * 1000) / 10 : 0;
     const absentPct = total > 0 ? Math.round((absent / total) * 1000) / 10 : 0;
     return { total, onTime, late, absent, onTimePct, latePct, absentPct };
-  }, [filteredAdminAttendance]);
+  }, [filteredAdminAttendance, timetable]);
 
   const adminSubKpis = useMemo(() => {
     const totalPeriods = filteredAdminSubstitutes.length;
@@ -761,26 +841,30 @@ export default function AdminPage() {
     setPdfModalOpen(true);
   };
 
-  const filteredPdfRecords = attendanceLogs.filter((r) => {
-    if (pdfTermId && r.termId !== pdfTermId) return false;
-    if (pdfSelectedTeacherId !== "all" && r.teacherId !== pdfSelectedTeacherId)
-      return false;
+  const filteredPdfRecords = useMemo(() => {
+    const list = attendanceLogs.filter((r) => {
+      if (pdfTermId && r.termId !== pdfTermId) return false;
+      if (pdfSelectedTeacherId !== "all" && r.teacherId !== pdfSelectedTeacherId)
+        return false;
 
-    if (pdfTimeRange === "custom") {
-      if (pdfStartDate && r.date < pdfStartDate) return false;
-      if (pdfEndDate && r.date > pdfEndDate) return false;
+      if (pdfTimeRange === "custom") {
+        if (pdfStartDate && r.date < pdfStartDate) return false;
+        if (pdfEndDate && r.date > pdfEndDate) return false;
+        return true;
+      } else if (pdfTimeRange === "week") {
+        const todayStr = getThaiDateString();
+        const weekAgoStr = getThaiOffsetDate(7);
+        return r.date >= weekAgoStr && r.date <= todayStr;
+      } else if (pdfTimeRange === "month") {
+        const todayStr = getThaiDateString();
+        const currentYM = todayStr.substring(0, 7);
+        return r.date.startsWith(currentYM);
+      }
       return true;
-    } else if (pdfTimeRange === "week") {
-      const todayStr = getThaiDateString();
-      const weekAgoStr = getThaiOffsetDate(7);
-      return r.date >= weekAgoStr && r.date <= todayStr;
-    } else if (pdfTimeRange === "month") {
-      const todayStr = getThaiDateString();
-      const currentYM = todayStr.substring(0, 7);
-      return r.date.startsWith(currentYM);
-    }
-    return true;
-  });
+    });
+
+    return deduplicateAttendanceRecords(list);
+  }, [attendanceLogs, pdfTermId, pdfSelectedTeacherId, pdfTimeRange, pdfStartDate, pdfEndDate]);
 
   const pdfDateRangeLabel = useMemo(() => {
     if (pdfTimeRange === "custom") {
@@ -1719,6 +1803,16 @@ export default function AdminPage() {
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   <span>ส่งออก Excel ({filteredAdminAttendance.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleAutoCleanAndRepairLogs}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 transition-all shadow-sm active:scale-95"
+                  title="ตรวจสอบและแก้ไขคาบเรียนที่บันทึกผิดพลาด/ซ้ำซ้อนให้ตรงกับตารางสอนจริง"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  <span>🧹 ซ่อมแซมและล้างข้อมูลซ้ำ</span>
                 </button>
               </div>
             </div>
@@ -4140,6 +4234,7 @@ export default function AdminPage() {
           term={currentPdfTermObj}
           teacher={selectedTeacherObj}
           teachers={teachers}
+          timetable={timetable}
           records={filteredPdfRecords}
           dateRangeLabel={pdfDateRangeLabel}
           onClose={() => setPdfModalOpen(false)}

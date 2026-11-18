@@ -25,11 +25,13 @@ import {
   getSchoolProfile,
   subscribeAttendance,
   getSubstituteAssignments,
+  getTimetable,
 } from "@/lib/storage";
 import { exportAttendanceToExcel } from "@/lib/excel";
-import { AcademicTerm, Teacher, AttendanceRecord, SchoolProfile, SubstituteAssignment, SubstituteLeaveType } from "@/types";
+import { AcademicTerm, Teacher, AttendanceRecord, SchoolProfile, SubstituteAssignment, SubstituteLeaveType, TimetableEntry } from "@/types";
 import { DEPARTMENTS } from "@/lib/constants";
 import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
+import { getEffectivePeriodCount, deduplicateAttendanceRecords } from "@/lib/attendanceUtils";
 
 type TimeFilter = "today" | "week" | "month" | "term" | "custom";
 
@@ -37,6 +39,7 @@ export default function StatisticsPage() {
   const [terms, setTerms] = useState<AcademicTerm[]>([]);
   const [selectedTermId, setSelectedTermId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [allAttendance, setAllAttendance] = useState<AttendanceRecord[]>([]);
   const [substitutes, setSubstitutes] = useState<SubstituteAssignment[]>([]);
   const [schoolProfile, setSchoolProfile] = useState<SchoolProfile | null>(null);
@@ -68,16 +71,18 @@ export default function StatisticsPage() {
   // Load Initial Data
   useEffect(() => {
     async function init() {
-      const [termList, tchList, prof, subList] = await Promise.all([
+      const [termList, tchList, prof, subList, ttList] = await Promise.all([
         getTerms(),
         getTeachers(),
         getSchoolProfile(),
         getSubstituteAssignments(),
+        getTimetable(),
       ]);
       setTerms(termList);
       setTeachers(tchList);
       setSchoolProfile(prof);
       setSubstitutes(subList);
+      setTimetable(ttList);
 
       const active = termList.find((t) => t.isActive) || termList[0];
       if (active) setSelectedTermId(active.id);
@@ -111,23 +116,8 @@ export default function StatisticsPage() {
       list = list.filter((r) => r.date >= customStartDate && r.date <= customEndDate);
     }
 
-    // Deduplicate records: if the same room, date, and period was recorded more than once, keep only the latest record
-    const seen = new Map<string, AttendanceRecord>();
-    list.forEach((r) => {
-      const key = `${r.classroomId}_${r.date}_${r.periodStart}`;
-      const existing = seen.get(key);
-      if (!existing) {
-        seen.set(key, r);
-      } else {
-        const existingTime = existing.updatedAt || existing.createdAt || "";
-        const currTime = r.updatedAt || r.createdAt || "";
-        if (currTime >= existingTime) {
-          seen.set(key, r);
-        }
-      }
-    });
-
-    return Array.from(seen.values());
+    // Deduplicate records: safely resolve overlapping periods per room & date, keeping only latest check-in
+    return deduplicateAttendanceRecords(list);
   }, [allAttendance, selectedTermId, timeFilter, customStartDate, customEndDate]);
 
   // Filter substitute records by Time range and Department
@@ -195,7 +185,7 @@ export default function StatisticsPage() {
       ) {
         return;
       }
-      const count = r.periodCount || 1;
+      const count = getEffectivePeriodCount(r, timetable);
       totalPeriods += count;
       if (r.status === "on_time") {
         onTimePeriods += count;
@@ -228,7 +218,7 @@ export default function StatisticsPage() {
       absentPercent: Math.round(absentPercent * 10) / 10,
       totalAttendanceRate: Math.round(totalAttendanceRate * 10) / 10,
     };
-  }, [filteredRecords]);
+  }, [filteredRecords, timetable]);
 
   // Teacher aggregated statistics
   const teacherStats = useMemo(() => {
@@ -255,7 +245,7 @@ export default function StatisticsPage() {
         let absent = 0;
 
         records.forEach((r) => {
-          const count = r.periodCount || 1;
+          const count = getEffectivePeriodCount(r, timetable);
           total += count;
           if (r.status === "on_time") onTime += count;
           else if (r.status === "late") late += count;
@@ -289,7 +279,7 @@ export default function StatisticsPage() {
           sensitivity: "base",
         });
       });
-  }, [teachers, filteredRecords, searchTeacher, selectedDept]);
+  }, [teachers, filteredRecords, searchTeacher, selectedDept, timetable]);
 
   // Current active term object
   const currentTerm = terms.find((t) => t.id === selectedTermId);
@@ -1068,7 +1058,7 @@ export default function StatisticsPage() {
                 );
 
                 const teacherTotalPeriods = teacherRecords.reduce(
-                  (acc, r) => acc + (r.periodCount || 1),
+                  (acc, r) => acc + getEffectivePeriodCount(r, timetable),
                   0
                 );
 
@@ -1105,9 +1095,9 @@ export default function StatisticsPage() {
                                   ? `คาบ ${r.periodStart}`
                                   : `คาบ ${r.periodStart}-${r.periodEnd}`}
                               </span>
-                              {r.periodStart !== r.periodEnd && (
+                              {getEffectivePeriodCount(r, timetable) > 1 && (
                                 <span className="px-2 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700 font-bold border border-indigo-200">
-                                  คาบคู่ (2 คาบ)
+                                  คาบคู่ ({getEffectivePeriodCount(r, timetable)} คาบ)
                                 </span>
                               )}
                               <span className="px-2 py-0.5 rounded text-xs bg-sky-50 text-sky-700 font-medium">
