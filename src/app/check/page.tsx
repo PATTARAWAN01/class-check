@@ -522,9 +522,15 @@ export default function StudentCheckPage() {
         return;
       }
 
-      setIsDoublePeriod(false);
-      setPeriodStart(periodNum);
-      setPeriodEnd(periodNum);
+      const isDouble = matchedTT.periodEnd > matchedTT.periodStart;
+      setIsDoublePeriod(isDouble);
+      if (isDouble) {
+        setPeriodStart(matchedTT.periodStart);
+        setPeriodEnd(matchedTT.periodEnd);
+      } else {
+        setPeriodStart(periodNum);
+        setPeriodEnd(periodNum);
+      }
 
       // Match subject (matches by code OR id OR name, resilient to spacing and spelling)
       const cleanSubjCode = (matchedTT.subjectCode || "").replace(/\s+/g, "").toUpperCase();
@@ -607,7 +613,9 @@ export default function StudentCheckPage() {
         }
       }
 
-      const periodLabel = `คาบที่ ${periodNum}`;
+      const periodLabel = isDouble
+        ? `คาบที่ ${matchedTT.periodStart} - ${matchedTT.periodEnd} (วิชาคาบคู่)`
+        : `คาบที่ ${periodNum}`;
 
       const subInfo = activeSub
         ? ` ➡️ ครูผู้สอนแทน: ${activeSub.substituteTeacherName}`
@@ -645,7 +653,6 @@ export default function StudentCheckPage() {
   const handlePeriodStartChange = (val: number) => {
     setPeriodStart(val);
     setPeriodEnd(val);
-    setIsDoublePeriod(false);
     if (selectedRoomId) {
       syncWithTimetable(selectedRoomId, checkDate, val);
     }
@@ -1534,6 +1541,16 @@ export default function StudentCheckPage() {
 
               {/* Period Buttons / Selectors with Morning & Afternoon separation */}
               <div className="space-y-3">
+                {isDoublePeriod && (
+                  <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-300 text-xs text-sky-900 flex items-center gap-2 shadow-xs">
+                    <span className="font-bold bg-sky-700 text-white px-2 py-0.5 rounded-md text-[11px] shrink-0">
+                      ⚡ วิชาคาบคู่
+                    </span>
+                    <span className="font-medium">
+                      ตารางสอนระบุเป็นวิชาคาบคู่ (คาบที่ {periodStart} - {periodEnd}) ระบบเลือกและบันทึกข้อมูลพร้อมกันให้อัตโนมัติ
+                    </span>
+                  </div>
+                )}
                 <div>
                   <div className="text-xs font-semibold text-slate-500 mb-1.5 flex items-center justify-between">
                     <span>ภาคเช้า (คาบ 1 - 4)</span>

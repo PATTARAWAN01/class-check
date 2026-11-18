@@ -2041,10 +2041,15 @@ export default function AdminPage() {
                                 <span>ประวัติแก้ไข ({log.editHistory.length})</span>
                               </button>
                             ) : log.updatedAt ? (
-                              <div className="text-[10px] text-amber-700">
-                                แก้ไขเมื่อ: {new Date(log.updatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.
-                                {log.updatedByStudent && ` (${log.updatedByStudent})`}
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setHistoryViewRecord(log)}
+                                className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors border border-amber-300 shadow-xs"
+                                title="คลิกเพื่อดูรายละเอียดการแก้ไข"
+                              >
+                                <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                <span>แก้ไขเมื่อ {new Date(log.updatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</span>
+                              </button>
                             ) : null}
                           </td>
                           <td className="p-3 text-center whitespace-nowrap">
@@ -4208,6 +4213,7 @@ export default function AdminPage() {
         records={attendanceLogs}
         schoolProfile={schoolProfile}
         initialDate={getThaiDateString()}
+        timetable={timetable}
       />
 
       {/* ========================================================== */}
@@ -4251,9 +4257,26 @@ export default function AdminPage() {
               </h4>
 
               {(!historyViewRecord.editHistory || historyViewRecord.editHistory.length === 0) ? (
-                <div className="text-center py-6 text-slate-400 text-xs">
-                  ยังไม่มีประวัติการแก้ไขสำหรับรายการนี้
-                </div>
+                historyViewRecord.updatedAt ? (
+                  <div className="p-3 rounded-2xl border border-amber-200 bg-amber-50/50 space-y-2 text-xs">
+                    <div className="flex items-center justify-between text-[11px] text-amber-900 border-b border-amber-200/60 pb-1 font-semibold">
+                      <span>การปรับปรุงข้อมูลล่าสุด</span>
+                      <span className="text-slate-500 font-normal">
+                        {new Date(historyViewRecord.updatedAt).toLocaleString("th-TH")}
+                      </span>
+                    </div>
+                    <div className="text-slate-700">
+                      <div>ผู้ปรับปรุง: <strong>{historyViewRecord.updatedByStudent || "ผู้ดูแลระบบ (Admin)"}</strong></div>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        * รายการนี้ถูกแก้ไขก่อนการบันทึก Audit Log ละเอียด ระบบจึงแสดงวันเวลาและผู้แก้ไขล่าสุดไว้ โดยการแก้ไขครั้งถัดไปจะบันทึกทุกฟิลด์ที่เปลี่ยนแปลงอัตโนมัติ
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-6 text-slate-400 text-xs">
+                    ยังไม่มีประวัติการแก้ไขสำหรับรายการนี้ (ยังไม่เคยมีการแก้ไข)
+                  </div>
+                )
               ) : (
                 historyViewRecord.editHistory.map((item, idx) => (
                   <div

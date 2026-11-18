@@ -1,9 +1,17 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
-import { Printer, X, Calendar, CheckCircle2, AlertTriangle, XCircle, Clock, Filter, Eye } from "lucide-react";
-import { Classroom, AttendanceRecord, SchoolProfile } from "@/types";
+import {
+  Printer,
+  X,
+  Calendar,
+  Filter,
+  Image as ImageIcon,
+  Loader2,
+} from "lucide-react";
+import { Classroom, AttendanceRecord, SchoolProfile, TimetableEntry } from "@/types";
 import { formatThaiDateLong, getThaiDateString } from "@/lib/dateUtils";
+import { toPng } from "html-to-image";
 
 interface ClassroomPeriodMatrixModalProps {
   isOpen: boolean;
@@ -12,6 +20,7 @@ interface ClassroomPeriodMatrixModalProps {
   records: AttendanceRecord[];
   schoolProfile: SchoolProfile;
   initialDate?: string;
+  timetable?: TimetableEntry[];
 }
 
 export default function ClassroomPeriodMatrixModal({
@@ -21,9 +30,11 @@ export default function ClassroomPeriodMatrixModal({
   records,
   schoolProfile,
   initialDate,
+  timetable = [],
 }: ClassroomPeriodMatrixModalProps) {
   const [selectedDate, setSelectedDate] = useState(() => initialDate || getThaiDateString());
   const [selectedGrade, setSelectedGrade] = useState<string>("all");
+  const [isExportingImage, setIsExportingImage] = useState(false);
 
   const pdfFileName = `ตารางสรุปการเช็คเข้าสอนรายห้องรายคาบ_${selectedDate}`;
 
@@ -44,6 +55,35 @@ export default function ClassroomPeriodMatrixModal({
       document.title = prevTitle;
     }, 1000);
   };
+
+  const handleExportImage = async () => {
+    const element = document.getElementById("matrix-printable-sheet");
+    if (!element) return;
+    try {
+      setIsExportingImage(true);
+      const dataUrl = await toPng(element, {
+        quality: 0.95,
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+      });
+      const link = document.createElement("a");
+      link.download = `${pdfFileName}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error("Export image error:", err);
+      alert("เกิดข้อผิดพลาดในการบันทึกรูปภาพ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setIsExportingImage(false);
+    }
+  };
+
+  // Day of week for selected date (0 = Sunday, 1 = Monday ... 6 = Saturday)
+  const dayOfWeek = useMemo(() => {
+    const parts = selectedDate.split("-").map(Number);
+    if (parts.length < 3 || isNaN(parts[0])) return 1;
+    return new Date(parts[0], parts[1] - 1, parts[2]).getDay();
+  }, [selectedDate]);
 
   // Filter records for the selected date
   const dayRecords = useMemo(() => {
@@ -76,6 +116,57 @@ export default function ClassroomPeriodMatrixModal({
     return map;
   }, [dayRecords]);
 
+  // Helper to identify non-academic / special activity periods from timetable
+  const getSpecialActivityLabel = (
+    clsId: string,
+    gradeRoom: string,
+    pNum: number,
+    dOfWeek: number
+  ): string | null => {
+    if (!timetable || timetable.length === 0) return null;
+    const match = timetable.find(
+      (tt) =>
+        (tt.classroomId === clsId || tt.gradeRoom === gradeRoom) &&
+        tt.dayOfWeek === dOfWeek &&
+        pNum >= tt.periodStart &&
+        pNum <= tt.periodEnd
+    );
+    if (!match) return null;
+
+    const name = match.subjectName || "";
+    const code = match.subjectCode || "";
+    const combined = `${name} ${code}`;
+
+    const activityKeywords = [
+      { kw: "ชุมนุม", label: "ชุมนุม" },
+      { kw: "ลูกเสือ", label: "ลูกเสือ" },
+      { kw: "เนตรนารี", label: "เนตรนารี" },
+      { kw: "ยุวกาชาด", label: "ยุวกาชาด" },
+      { kw: "พัฒนาทักษะชีวิต", label: "ทักษะชีวิต" },
+      { kw: "บำเพ็ญประโยชน์", label: "บำเพ็ญฯ" },
+      { kw: "ติว", label: "ติว" },
+      { kw: "โอเน็ต", label: "O-NET" },
+      { kw: "O-NET", label: "O-NET" },
+      { kw: "เลือกเสรี", label: "เลือกเสรี" },
+      { kw: "กิจกรรม", label: "กิจกรรม" },
+      { kw: "แนะแนว", label: "แนะแนว" },
+      { kw: "IS", label: "IS" },
+      { kw: "โฮมรูม", label: "โฮมรูม" },
+    ];
+
+    for (const item of activityKeywords) {
+      if (combined.includes(item.kw)) {
+        return item.label;
+      }
+    }
+
+    if (match.teacherName === "ไม่ระบุ" || !code || code === "-") {
+      return name ? name.slice(0, 8) : "กิจกรรม";
+    }
+
+    return null;
+  };
+
   // Overall Statistics for selected date
   const stats = useMemo(() => {
     let fullyChecked = 0;
@@ -106,14 +197,14 @@ export default function ClassroomPeriodMatrixModal({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 6mm 8mm 6mm 8mm;
+            margin: 5mm 6mm 5mm 6mm;
           }
           html, body {
             background: white !important;
             color: black !important;
             margin: 0 !important;
             padding: 0 !important;
-            font-size: 8.5pt !important;
+            font-size: 8pt !important;
           }
           .no-print {
             display: none !important;
@@ -131,7 +222,7 @@ export default function ClassroomPeriodMatrixModal({
           }
           .matrix-table th, .matrix-table td {
             border: 1px solid #475569 !important;
-            padding: 2.5px 3px !important;
+            padding: 2px 2.5px !important;
             line-height: 1.1 !important;
           }
           .avoid-break {
@@ -143,7 +234,7 @@ export default function ClassroomPeriodMatrixModal({
 
       <div className="bg-white rounded-3xl max-w-6xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[96vh] print:max-h-none print:shadow-none print:border-none print:rounded-none">
         {/* Modal Top Bar (Hidden on Print) */}
-        <div className="bg-slate-900 text-white p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-3 no-print">
+        <div className="bg-slate-900 text-white p-3 sm:p-4 flex flex-wrap items-center justify-between gap-2.5 no-print">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
               <Calendar className="w-5 h-5" />
@@ -185,6 +276,23 @@ export default function ClassroomPeriodMatrixModal({
               </select>
             </div>
 
+            {/* Save as PNG Image Button */}
+            <button
+              type="button"
+              onClick={handleExportImage}
+              disabled={isExportingImage}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-colors"
+              title="บันทึกตารางเป็นไฟล์รูปภาพ PNG สำหรับส่งไลน์หรือใส่เอกสาร"
+            >
+              {isExportingImage ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ImageIcon className="w-3.5 h-3.5" />
+              )}
+              <span>{isExportingImage ? "กำลังบันทึกภาพ..." : "📷 บันทึกเป็นรูปภาพ (PNG)"}</span>
+            </button>
+
+            {/* Print Button */}
             <button
               type="button"
               onClick={handlePrint}
@@ -205,14 +313,17 @@ export default function ClassroomPeriodMatrixModal({
         </div>
 
         {/* Printable Matrix Sheet */}
-        <div className="p-4 sm:p-6 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 font-sans matrix-print-sheet">
+        <div
+          id="matrix-printable-sheet"
+          className="p-4 sm:p-5 overflow-y-auto print:p-0 print:overflow-visible text-slate-800 font-sans matrix-print-sheet bg-white"
+        >
           {/* Header */}
           <div className="text-center border-b pb-2 mb-2 relative">
             <div className="flex items-center justify-center gap-2 mb-1">
               <img
                 src="/LOGO-N.png"
                 alt="โรงเรียนหนองวัวซอพิทยาคม"
-                className="w-10 h-10 object-contain"
+                className="w-9 h-9 object-contain"
               />
               <div className="text-center">
                 <h1 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
@@ -226,14 +337,14 @@ export default function ClassroomPeriodMatrixModal({
 
             <div className="flex items-center justify-between text-[11px] text-slate-700 font-bold px-1 mt-1">
               <span>ประจำวัน: <strong>{thaiDateLabel}</strong> ({selectedDate})</span>
-              <span className="text-[10px] text-slate-500 font-normal">
-                สัญลักษณ์: <span className="text-emerald-700 font-bold">● ตรงเวลา</span> &bull; <span className="text-amber-700 font-bold">▲ สาย</span> &bull; <span className="text-rose-700 font-bold">✕ ไม่เข้าสอน</span> &bull; <span className="text-slate-400">- ยังไม่เช็ค</span>
+              <span className="text-[9.5px] text-slate-500 font-normal">
+                สัญลักษณ์: <span className="text-emerald-700 font-bold">● ตรงเวลา</span> &bull; <span className="text-amber-700 font-bold">▲ สาย</span> &bull; <span className="text-rose-700 font-bold">✕ ไม่เข้าสอน</span> &bull; <span className="text-slate-500 font-medium bg-slate-100 px-1 rounded">[กิจกรรม/คาบว่าง]</span> &bull; <span className="text-slate-400">- ยังไม่เช็ค</span>
               </span>
             </div>
           </div>
 
           {/* Quick Stats Pill (Hidden on Print) */}
-          <div className="mb-3 grid grid-cols-4 gap-2 text-center text-xs no-print">
+          <div className="mb-2.5 grid grid-cols-4 gap-2 text-center text-xs no-print">
             <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-200">
               <div className="text-[10px] text-emerald-800">เช็คครบ 7 คาบ</div>
               <div className="text-base font-bold text-emerald-900">{stats.fullyChecked} ห้อง</div>
@@ -257,15 +368,15 @@ export default function ClassroomPeriodMatrixModal({
             <table className="w-full text-xs border-collapse border border-slate-300 matrix-table">
               <thead>
                 <tr className="bg-slate-800 text-white font-bold text-center text-[10px] sm:text-xs">
-                  <th className="p-1 border border-slate-300 w-16 text-center">ห้องเรียน</th>
-                  <th className="p-1 border border-slate-300">คาบ 1<br/><span className="text-[8px] font-normal text-slate-300">08:40-09:30</span></th>
-                  <th className="p-1 border border-slate-300">คาบ 2<br/><span className="text-[8px] font-normal text-slate-300">09:30-10:20</span></th>
-                  <th className="p-1 border border-slate-300">คาบ 3<br/><span className="text-[8px] font-normal text-slate-300">10:20-11:10</span></th>
-                  <th className="p-1 border border-slate-300">คาบ 4<br/><span className="text-[8px] font-normal text-slate-300">11:10-12:00</span></th>
-                  <th className="p-1 border border-slate-300">คาบ 5<br/><span className="text-[8px] font-normal text-slate-300">13:00-13:50</span></th>
-                  <th className="p-1 border border-slate-300">คาบ 6<br/><span className="text-[8px] font-normal text-slate-300">13:50-14:40</span></th>
-                  <th className="p-1 border border-slate-300">คาบ 7<br/><span className="text-[8px] font-normal text-slate-300">14:40-15:30</span></th>
-                  <th className="p-1 border border-slate-300 w-16 text-center">ความคืบหน้า</th>
+                  <th className="p-1 border border-slate-300 w-14 min-w-[56px] text-center">ห้องเรียน</th>
+                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 1<br/><span className="text-[8px] font-normal text-slate-300">08:40-09:30</span></th>
+                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 2<br/><span className="text-[8px] font-normal text-slate-300">09:30-10:20</span></th>
+                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 3<br/><span className="text-[8px] font-normal text-slate-300">10:20-11:10</span></th>
+                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 4<br/><span className="text-[8px] font-normal text-slate-300">11:10-12:00</span></th>
+                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 5<br/><span className="text-[8px] font-normal text-slate-300">13:00-13:50</span></th>
+                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 6<br/><span className="text-[8px] font-normal text-slate-300">13:50-14:40</span></th>
+                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 7<br/><span className="text-[8px] font-normal text-slate-300">14:40-15:30</span></th>
+                  <th className="p-1 border border-slate-300 w-16 min-w-[64px] text-center">ความคืบหน้า</th>
                 </tr>
               </thead>
               <tbody>
@@ -281,13 +392,34 @@ export default function ClassroomPeriodMatrixModal({
                         isNewGrade && idx > 0 ? "border-t-2 border-slate-400" : ""
                       }`}
                     >
-                      <td className="p-1 border border-slate-300 font-bold bg-slate-50 text-slate-900 text-left pl-2 whitespace-nowrap">
+                      <td className="p-1 border border-slate-300 font-bold bg-slate-50 text-slate-900 text-center whitespace-nowrap">
                         {cls.gradeRoom}
                       </td>
 
                       {periods.map((pNum) => {
                         const rec = roomMap ? roomMap.get(pNum) : undefined;
                         if (!rec) {
+                          const specialActivity = getSpecialActivityLabel(
+                            cls.id,
+                            cls.gradeRoom,
+                            pNum,
+                            dayOfWeek
+                          );
+
+                          if (specialActivity) {
+                            return (
+                              <td
+                                key={pNum}
+                                className="p-1 border border-slate-300 bg-slate-100/90 text-slate-500 text-center font-medium"
+                                title={`${specialActivity} (คาบกิจกรรม/คาบแยกเรียน ไม่ต้องเช็คเวลา)`}
+                              >
+                                <span className="text-[8.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-600 font-semibold inline-block">
+                                  [{specialActivity}]
+                                </span>
+                              </td>
+                            );
+                          }
+
                           return (
                             <td
                               key={pNum}
@@ -307,7 +439,7 @@ export default function ClassroomPeriodMatrixModal({
                             >
                               <div className="flex items-center justify-center gap-0.5">
                                 <span className="text-[9px] text-emerald-700 font-bold">●</span>
-                                <span className="text-[9px] truncate max-w-[70px]">
+                                <span className="text-[9px] truncate max-w-[66px]">
                                   {rec.subjectCode || "ตรงเวลา"}
                                 </span>
                               </div>
@@ -324,7 +456,7 @@ export default function ClassroomPeriodMatrixModal({
                             >
                               <div className="flex items-center justify-center gap-0.5">
                                 <span className="text-[9px] text-amber-700 font-bold">▲</span>
-                                <span className="text-[9px] truncate max-w-[70px]">
+                                <span className="text-[9px] truncate max-w-[66px]">
                                   {rec.subjectCode || "สาย"}
                                 </span>
                               </div>
@@ -340,7 +472,7 @@ export default function ClassroomPeriodMatrixModal({
                           >
                             <div className="flex items-center justify-center gap-0.5">
                               <span className="text-[9px] text-rose-600 font-bold">✕</span>
-                              <span className="text-[9px] truncate max-w-[70px]">
+                              <span className="text-[9px] truncate max-w-[66px]">
                                 {rec.subjectCode || "ไม่เข้า"}
                               </span>
                             </div>
@@ -369,7 +501,7 @@ export default function ClassroomPeriodMatrixModal({
           </div>
 
           {/* Footer Note */}
-          <div className="mt-2 text-right text-[9px] text-slate-500">
+          <div className="mt-1.5 text-right text-[8.5px] text-slate-500">
             เอกสารสรุปอัตโนมัติจากระบบ Class Check &bull; พิมพ์เมื่อ {formatThaiDateLong(getThaiDateString())}
           </div>
         </div>
@@ -377,7 +509,7 @@ export default function ClassroomPeriodMatrixModal({
         {/* Modal Footer (Hidden on Print) */}
         <div className="bg-slate-50 border-t border-slate-200 p-3 text-xs text-slate-500 flex items-center justify-between no-print">
           <div>
-            💡 <strong className="text-slate-700">คำแนะนำ:</strong> จัดหน้ากระดาษแบบ A4 แนวตั้ง (Portrait) ตาราง 27 ห้องเรียนจะพอดีใน 1 หน้ากระดาษพอดี
+            💡 <strong className="text-slate-700">คำแนะนำ:</strong> จัดหน้ากระดาษแบบ A4 แนวตั้ง (Portrait) ตาราง 27 ห้องเรียนจะพอดีใน 1 หน้ากระดาษพอดี หรือกด "บันทึกเป็นรูปภาพ (PNG)" เพื่อแชร์ภาพได้ทันที
           </div>
           <button
             type="button"
