@@ -85,6 +85,19 @@ export interface DepartmentPin {
   pin: string;
 }
 
+export interface AttendanceEditChange {
+  field: string;
+  oldValue: string;
+  newValue: string;
+}
+
+export interface AttendanceEditLog {
+  timestamp: string; // ISO string
+  editorName: string; // e.g. "ผู้ดูแลระบบ (Admin)"
+  changes: AttendanceEditChange[];
+  clientIp?: string;
+}
+
 export interface AttendanceRecord {
   id: string;
   termId: string;
@@ -111,6 +124,7 @@ export interface AttendanceRecord {
   createdAt: string;
   updatedAt?: string;
   updatedByStudent?: string;
+  editHistory?: AttendanceEditLog[];
 }
 
 export interface Signer {

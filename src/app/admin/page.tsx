@@ -102,6 +102,8 @@ import OfficialPdfReport from "@/components/OfficialPdfReport";
 import OfficialSubstitutePdfReport from "@/components/OfficialSubstitutePdfReport";
 import ClassroomQrPrint from "@/components/ClassroomQrPrint";
 import ClassroomPinPrintModal from "@/components/ClassroomPinPrintModal";
+import ClassroomPeriodMatrixModal from "@/components/ClassroomPeriodMatrixModal";
+import SubstituteExcelImporter from "@/components/SubstituteExcelImporter";
 import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
 import { generateSecurePin } from "@/lib/pinUtils";
 
@@ -169,6 +171,8 @@ export default function AdminPage() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [showPinPrintModal, setShowPinPrintModal] = useState(false);
   const [showSubPdfModal, setShowSubPdfModal] = useState(false);
+  const [showMatrixModal, setShowMatrixModal] = useState(false);
+  const [historyViewRecord, setHistoryViewRecord] = useState<AttendanceRecord | null>(null);
   const [gradeDraftPins, setGradeDraftPins] = useState<Record<string, string>>({});
   const [gradeSaving, setGradeSaving] = useState<Record<string, boolean>>({});
   const [copiedGrade, setCopiedGrade] = useState<string | null>(null);
@@ -188,7 +192,7 @@ export default function AdminPage() {
 
   // Substitute Management State (Admin Centralized)
   const [substitutes, setSubstitutes] = useState<SubstituteAssignment[]>([]);
-  const [subTab, setSubTab] = useState<"ocr" | "history">("ocr");
+  const [subTab, setSubTab] = useState<"excel" | "ocr" | "history">("excel");
   const [subTimeFilter, setSubTimeFilter] = useState<"today" | "week" | "month" | "all" | "custom">("today");
   const [subStartDate, setSubStartDate] = useState(() => getThaiOffsetDate(7));
   const [subEndDate, setSubEndDate] = useState(() => getThaiDateString());
@@ -458,7 +462,67 @@ export default function AdminPage() {
 
   const handleSaveEditLog = async (updated: AttendanceRecord) => {
     try {
-      await updateAttendanceLog(updated);
+      const original = attendanceLogs.find((r) => r.id === updated.id);
+      const changes = [];
+      const statusLabels: Record<string, string> = {
+        on_time: "เข้าสอนตรงเวลา",
+        late: "เข้าสอนสาย (>10 นาที)",
+        absent: "ไม่เข้าสอน",
+      };
+
+      if (original) {
+        if (original.status !== updated.status) {
+          changes.push({
+            field: "สถานะการเข้าสอน",
+            oldValue: statusLabels[original.status] || original.status,
+            newValue: statusLabels[updated.status] || updated.status,
+          });
+        }
+        if (original.teacherId !== updated.teacherId || original.teacherName !== updated.teacherName) {
+          changes.push({
+            field: "ครูผู้สอน",
+            oldValue: original.teacherName,
+            newValue: updated.teacherName,
+          });
+        }
+        if (original.date !== updated.date) {
+          changes.push({
+            field: "วันที่สอน",
+            oldValue: original.date,
+            newValue: updated.date,
+          });
+        }
+        if (original.absenceReason !== updated.absenceReason) {
+          changes.push({
+            field: "สาเหตุการไม่เข้าสอน",
+            oldValue: original.absenceReason || "-",
+            newValue: updated.absenceReason || "-",
+          });
+        }
+        if ((original.absenceNote || "") !== (updated.absenceNote || "")) {
+          changes.push({
+            field: "หมายเหตุ",
+            oldValue: original.absenceNote || "-",
+            newValue: updated.absenceNote || "-",
+          });
+        }
+      }
+
+      const editEntry = {
+        timestamp: new Date().toISOString(),
+        editorName: "ผู้ดูแลระบบ (Admin)",
+        changes: changes.length > 0 ? changes : [{ field: "บันทึกแก้ไขข้อมูล", oldValue: "-", newValue: "อัปเดตข้อมูล" }],
+        clientIp: "ระบบหลังบ้านแอดมิน",
+      };
+
+      const finalRecord: AttendanceRecord = {
+        ...updated,
+        updatedAt: new Date().toISOString(),
+        updatedByStudent: "ผู้ดูแลระบบ (Admin)",
+        editHistory: [...(original?.editHistory || []), editEntry],
+      };
+
+      await updateAttendanceLog(finalRecord);
       showNotice("บันทึกการแก้ไขข้อมูลเรียบร้อยแล้ว", "success");
       setShowEditLogModal(false);
       setEditingLog(null);
@@ -1309,7 +1373,7 @@ export default function AdminPage() {
   // ==================== AUTHENTICATED ADMIN DASHBOARD ====================
   return (
     <>
-      <div className={`space-y-6 ${pdfModalOpen || showQrModal || showPinPrintModal || showSubPdfModal ? "no-print" : ""}`}>
+      <div className={`space-y-6 ${pdfModalOpen || showQrModal || showPinPrintModal || showSubPdfModal || showMatrixModal ? "no-print" : ""}`}>
       {/* Admin Top Header */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -1571,6 +1635,14 @@ export default function AdminPage() {
                 <Printer className="w-4 h-4" />
                 <span>พิมพ์รายงานสถิติสอนแทนทางการ (PDF)</span>
               </button>
+
+              <button
+                onClick={() => setShowMatrixModal(true)}
+                className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-md transition-all flex items-center gap-2"
+              >
+                <Calendar className="w-4 h-4" />
+                <span>ตารางสรุปการเช็คชื่อ 27 ห้อง (1 หน้า A4)</span>
+              </button>
             </div>
           </div>
 
@@ -1622,6 +1694,16 @@ export default function AdminPage() {
                     <span>ลบที่เลือก ({selectedLogIds.length})</span>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowMatrixModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white transition-all shadow-sm active:scale-95"
+                  title="เปิดดูตารางสรุปการเช็คเวลาเรียน 27 ห้องเรียนและพิมพ์ออก 1 หน้า A4"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>ตารางสรุป 27 ห้อง (1 หน้า A4)</span>
+                </button>
 
                 <button
                   type="button"
@@ -1948,12 +2030,22 @@ export default function AdminPage() {
                           </td>
                           <td className="p-3 whitespace-nowrap text-slate-600">
                             <div>ผู้บันทึก: <strong>{log.recordedByStudent || "ไม่ระบุ"}</strong></div>
-                            {log.updatedAt && (
+                            {log.editHistory && log.editHistory.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setHistoryViewRecord(log)}
+                                className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors border border-amber-300 shadow-xs"
+                                title="ดูประวัติการแก้ไขรายการนี้"
+                              >
+                                <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                <span>ประวัติแก้ไข ({log.editHistory.length})</span>
+                              </button>
+                            ) : log.updatedAt ? (
                               <div className="text-[10px] text-amber-700">
                                 แก้ไขเมื่อ: {new Date(log.updatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.
                                 {log.updatedByStudent && ` (${log.updatedByStudent})`}
                               </div>
-                            )}
+                            ) : null}
                           </td>
                           <td className="p-3 text-center whitespace-nowrap">
                             <div className="flex items-center justify-center gap-1.5">
@@ -2021,6 +2113,18 @@ export default function AdminPage() {
               <div className="flex items-center bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
                 <button
                   type="button"
+                  onClick={() => setSubTab("excel")}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    subTab === "excel"
+                      ? "bg-white text-emerald-700 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>นำเข้าไฟล์ Excel / CSV (แนะนำ)</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setSubTab("ocr")}
                   className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                     subTab === "ocr"
@@ -2029,7 +2133,7 @@ export default function AdminPage() {
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  <span>นำเข้ารายงาน (PDF OCR)</span>
+                  <span>นำเข้า (PDF OCR)</span>
                 </button>
                 <button
                   type="button"
@@ -2041,12 +2145,31 @@ export default function AdminPage() {
                   }`}
                 >
                   <Calendar className="w-3.5 h-3.5" />
-                  <span>ประวัติ &amp; สถิติย้อนหลัง ({substitutes.length})</span>
+                  <span>ประวัติ &amp; สถิติ ({substitutes.length})</span>
                 </button>
               </div>
             </div>
 
-            {/* TAB CONTENT 1: OCR IMPORTER */}
+            {/* TAB CONTENT 1: EXCEL IMPORTER */}
+            {subTab === "excel" && (
+              <div>
+                <SubstituteExcelImporter
+                  teachers={teachers}
+                  classrooms={classrooms}
+                  subjects={subjects}
+                  timetable={timetable}
+                  activeTerm={terms.find((t) => t.isActive) || terms[0] || null}
+                  onImportComplete={async (count: number) => {
+                    const updated = await getSubstituteAssignments();
+                    setSubstitutes(updated);
+                    showNotice(`บันทึกและนำเข้าข้อมูลจัดสอนแทนจากไฟล์ Excel สำเร็จเรียบร้อย (${count} คาบ)`, "success");
+                    setSubTab("history");
+                  }}
+                />
+              </div>
+            )}
+
+            {/* TAB CONTENT 2: OCR IMPORTER */}
             {subTab === "ocr" && (
               <div>
                 <SubstituteOcrImporter
@@ -4073,6 +4196,109 @@ export default function AdminPage() {
           }
           onClose={() => setShowSubPdfModal(false)}
         />
+      )}
+
+      {/* ========================================================== */}
+      {/* CLASSROOM PERIOD MATRIX MODAL (27 ROOMS x 7 PERIODS) */}
+      {/* ========================================================== */}
+      <ClassroomPeriodMatrixModal
+        isOpen={showMatrixModal}
+        onClose={() => setShowMatrixModal(false)}
+        classrooms={classrooms}
+        records={attendanceLogs}
+        schoolProfile={schoolProfile}
+        initialDate={getThaiDateString()}
+      />
+
+      {/* ========================================================== */}
+      {/* ATTENDANCE RECORD EDIT HISTORY (AUDIT TRAIL MODAL) */}
+      {/* ========================================================== */}
+      {historyViewRecord && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+                  <Clock className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base">
+                    ประวัติการแก้ไขข้อมูลบันทึกเข้าสอน
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    ห้อง {historyViewRecord.gradeRoom} &bull; วันที่ {historyViewRecord.date} (คาบที่ {historyViewRecord.periodStart})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryViewRecord(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1">
+              <div>วิชา: <strong>{historyViewRecord.subjectCode}</strong> {historyViewRecord.subjectName}</div>
+              <div>ครูผู้สอนปัจจุบัน: <strong>{historyViewRecord.teacherName}</strong></div>
+              <div>ผู้บันทึกคนแรก: <strong>{historyViewRecord.recordedByStudent || "ไม่ระบุ"}</strong> (เมื่อ {new Date(historyViewRecord.createdAt).toLocaleString("th-TH")})</div>
+            </div>
+
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                บันทึกการเปลี่ยนแปลง ({historyViewRecord.editHistory?.length || 0} ครั้ง)
+              </h4>
+
+              {(!historyViewRecord.editHistory || historyViewRecord.editHistory.length === 0) ? (
+                <div className="text-center py-6 text-slate-400 text-xs">
+                  ยังไม่มีประวัติการแก้ไขสำหรับรายการนี้
+                </div>
+              ) : (
+                historyViewRecord.editHistory.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-2xl border border-amber-200 bg-amber-50/50 space-y-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between text-[11px] text-amber-900 border-b border-amber-200/60 pb-1 font-semibold">
+                      <span>ครั้งที่ {idx + 1} โดย {item.editorName}</span>
+                      <span className="text-slate-500 font-normal">
+                        {new Date(item.timestamp).toLocaleString("th-TH")}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 text-slate-700">
+                      {item.changes?.map((ch, cIdx) => (
+                        <div key={cIdx} className="flex items-start gap-1.5 text-[11px]">
+                          <span className="font-bold text-slate-800 shrink-0">&bull; {ch.field}:</span>
+                          <span className="text-rose-700 line-through shrink-0">{ch.oldValue}</span>
+                          <span className="text-slate-400 font-bold shrink-0">&rarr;</span>
+                          <span className="text-emerald-800 font-bold">{ch.newValue}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {item.clientIp && (
+                      <div className="text-[10px] text-slate-400 pt-0.5">
+                        ช่องทาง: {item.clientIp}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setHistoryViewRecord(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors"
+              >
+                ปิดหน้าต่าง
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ========================================================== */}

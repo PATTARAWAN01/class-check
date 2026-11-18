@@ -175,7 +175,20 @@ export default function OfficialPdfReport({
     }, 1000);
   };
 
-  const isLandscape = !teacher;
+  const isLandscape = false; // Locked to A4 portrait to strictly guarantee 1 single page!
+
+  const shortenDept = (dept: string) => {
+    const clean = (dept || "").replace("กลุ่มสาระการเรียนรู้", "").trim();
+    if (clean.includes("วิทยาศาสตร์")) return "วิทย์ฯ";
+    if (clean.includes("คณิตศาสตร์")) return "คณิตฯ";
+    if (clean.includes("ภาษาไทย")) return "ภาษาไทย";
+    if (clean.includes("ต่างประเทศ")) return "ต่างประเทศ";
+    if (clean.includes("สังคม")) return "สังคมฯ";
+    if (clean.includes("สุขศึกษา") || clean.includes("พลศึกษา")) return "สุขฯ/พละ";
+    if (clean.includes("ศิลปะ")) return "ศิลปะ";
+    if (clean.includes("การงาน")) return "การงานฯ";
+    return clean;
+  };
 
   return (
     <div
@@ -187,8 +200,8 @@ export default function OfficialPdfReport({
           __html: `
             @media print {
               @page {
-                size: ${isLandscape ? "A4 landscape" : "A4 portrait"} !important;
-                margin: 0 !important;
+                size: A4 portrait !important;
+                margin: 5mm 6mm 5mm 6mm !important;
               }
               html, body {
                 margin: 0 !important;
@@ -196,12 +209,13 @@ export default function OfficialPdfReport({
                 background: #ffffff !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
+                font-size: 8.5pt !important;
               }
               .report-document-sheet {
-                padding: 10mm 14mm !important;
+                padding: 0 !important;
                 margin: 0 auto !important;
                 box-shadow: none !important;
-                max-width: none !important;
+                max-width: 100% !important;
                 min-width: 0 !important;
                 width: 100% !important;
                 min-height: auto !important;
@@ -288,47 +302,57 @@ export default function OfficialPdfReport({
         </div>
 
         {/* Statistical Summary Box */}
-        <div className="bg-slate-50 border border-slate-300 rounded-lg p-4 mb-6 text-sm">
-          <h3 className="font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">
-            {teacher ? "สรุปผลการปฏิบัติการสอน" : "สรุปผลการปฏิบัติการสอนภาพรวมทั้งโรงเรียน"}
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-            <div className="p-2 bg-white rounded border border-slate-200">
-              <div className="text-xs text-slate-500">คาบสอนทั้งหมด</div>
-              <div className="text-lg font-bold text-slate-900">{totalPeriods} คาบ</div>
-            </div>
-            <div className="p-2 bg-white rounded border border-slate-200">
-              <div className="text-xs text-emerald-700">เข้าสอนตรงเวลา</div>
-              <div className="text-lg font-bold text-emerald-700">
-                {onTimePeriods} คาบ ({onTimeRate}%)
-              </div>
-            </div>
-            <div className="p-2 bg-white rounded border border-slate-200">
-              <div className="text-xs text-amber-700">เข้าสอนสาย (&gt;10น.)</div>
-              <div className="text-lg font-bold text-amber-700">
-                {latePeriods} คาบ ({lateRate}%)
-              </div>
-            </div>
-            <div className="p-2 bg-white rounded border border-slate-200">
-              <div className="text-xs text-rose-700">ไม่เข้าสอน</div>
-              <div className="text-lg font-bold text-rose-700">
-                {absentPeriods} คาบ ({absentRate}%)
-              </div>
-            </div>
+        <div className="bg-slate-50 border border-slate-300 rounded-lg p-3 sm:p-4 mb-4 sm:mb-6 text-sm print:p-1.5 print:mb-2 print:border-slate-300 print:bg-white">
+          <div className="hidden print:flex items-center justify-between text-[8.5pt] font-semibold text-slate-800">
+            <span>คาบรวมทั้งหมด: <strong className="text-slate-900">{totalPeriods}</strong> คาบ</span>
+            <span className="text-emerald-800">ตรงเวลา: <strong>{onTimePeriods}</strong> ({onTimeRate}%)</span>
+            <span className="text-amber-800">สาย: <strong>{latePeriods}</strong> ({lateRate}%)</span>
+            <span className="text-rose-800 font-bold">ไม่เข้าสอน: <strong>{absentPeriods}</strong> ({absentRate}%)</span>
+            <span>ร้อยละเข้าสอนรวม: <strong className="text-slate-900">{overallRate}%</strong></span>
           </div>
 
-          <div className="mt-3 pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between text-xs text-slate-600">
-            <div>
-              <span>ร้อยละการเข้าสอนรวม (ตรงเวลา + สาย): </span>
-              <strong className="text-sky-900 font-bold text-sm">{overallRate}%</strong>
-            </div>
-            {absentPeriods > 0 && (
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-slate-600 font-medium">
-                <span>&bull; ประชุม: <strong className="text-slate-900">{absentMeeting}</strong></span>
-                <span>&bull; กิจกรรมสำคัญ: <strong className="text-slate-900">{absentActivity}</strong></span>
-                <span>&bull; อื่นๆ: <strong className="text-slate-900">{absentOther}</strong></span>
+          <div className="print:hidden">
+            <h3 className="font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">
+              {teacher ? "สรุปผลการปฏิบัติการสอน" : "สรุปผลการปฏิบัติการสอนภาพรวมทั้งโรงเรียน"}
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+              <div className="p-2 bg-white rounded border border-slate-200">
+                <div className="text-xs text-slate-500">คาบสอนทั้งหมด</div>
+                <div className="text-lg font-bold text-slate-900">{totalPeriods} คาบ</div>
               </div>
-            )}
+              <div className="p-2 bg-white rounded border border-slate-200">
+                <div className="text-xs text-emerald-700">เข้าสอนตรงเวลา</div>
+                <div className="text-lg font-bold text-emerald-700">
+                  {onTimePeriods} คาบ ({onTimeRate}%)
+                </div>
+              </div>
+              <div className="p-2 bg-white rounded border border-slate-200">
+                <div className="text-xs text-amber-700">เข้าสอนสาย (&gt;10น.)</div>
+                <div className="text-lg font-bold text-amber-700">
+                  {latePeriods} คาบ ({lateRate}%)
+                </div>
+              </div>
+              <div className="p-2 bg-white rounded border border-slate-200">
+                <div className="text-xs text-rose-700">ไม่เข้าสอน</div>
+                <div className="text-lg font-bold text-rose-700">
+                  {absentPeriods} คาบ ({absentRate}%)
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between text-xs text-slate-600">
+              <div>
+                <span>ร้อยละการเข้าสอนรวม (ตรงเวลา + สาย): </span>
+                <strong className="text-sky-900 font-bold text-sm">{overallRate}%</strong>
+              </div>
+              {absentPeriods > 0 && (
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-slate-600 font-medium">
+                  <span>&bull; ประชุม: <strong className="text-slate-900">{absentMeeting}</strong></span>
+                  <span>&bull; กิจกรรมสำคัญ: <strong className="text-slate-900">{absentActivity}</strong></span>
+                  <span>&bull; อื่นๆ: <strong className="text-slate-900">{absentOther}</strong></span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -345,61 +369,61 @@ export default function OfficialPdfReport({
               </span>
             </div>
 
-            <table className="w-full text-left text-xs print:text-[10px] border-collapse border border-slate-300">
+            <table className="w-full text-left text-xs print:text-[7.8pt] border-collapse border border-slate-300">
               <thead>
                 <tr className="bg-slate-100 text-slate-800 font-semibold text-center print:bg-slate-100">
-                  <th className="border border-slate-300 p-1.5 w-8 text-center whitespace-nowrap">ที่</th>
-                  <th className="border border-slate-300 p-1.5 text-left whitespace-nowrap min-w-[190px]">
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-7 text-center whitespace-nowrap">ที่</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 text-left whitespace-nowrap">
                     ชื่อ - สกุลครูผู้สอน
                   </th>
-                  <th className="border border-slate-300 p-1.5 text-left whitespace-nowrap min-w-[140px]">
-                    กลุ่มสาระการเรียนรู้
+                  <th className="border border-slate-300 p-1 print:p-0.5 text-left whitespace-nowrap">
+                    กลุ่มสาระ
                   </th>
-                  <th className="border border-slate-300 p-1.5 w-14 text-center whitespace-nowrap">คาบรวม</th>
-                  <th className="border border-slate-300 p-1.5 w-14 text-center whitespace-nowrap text-emerald-800">ตรงเวลา</th>
-                  <th className="border border-slate-300 p-1.5 w-12 text-center whitespace-nowrap text-amber-800">สาย</th>
-                  <th className="border border-slate-300 p-1.5 w-16 text-center whitespace-nowrap text-rose-800 font-bold">ไม่เข้าสอน</th>
-                  <th className="border border-slate-300 p-1.5 w-14 text-center whitespace-nowrap text-slate-700">ประชุม</th>
-                  <th className="border border-slate-300 p-1.5 w-16 text-center whitespace-nowrap text-slate-700">กิจกรรมสำคัญ</th>
-                  <th className="border border-slate-300 p-1.5 text-left whitespace-nowrap min-w-[150px] text-slate-700">อื่นๆ / ระบุเหตุผล</th>
-                  <th className="border border-slate-300 p-1.5 w-20 text-center whitespace-nowrap font-bold text-slate-900">ร้อยละเข้าสอน</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-11 text-center whitespace-nowrap">คาบรวม</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-11 text-center whitespace-nowrap text-emerald-800">ตรงเวลา</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-9 text-center whitespace-nowrap text-amber-800">สาย</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-12 text-center whitespace-nowrap text-rose-800 font-bold">ไม่เข้าสอน</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-10 text-center whitespace-nowrap text-slate-700">ประชุม</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-11 text-center whitespace-nowrap text-slate-700">กิจกรรม</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 text-left whitespace-nowrap text-slate-700">อื่นๆ/เหตุผล</th>
+                  <th className="border border-slate-300 p-1 print:p-0.5 w-14 text-center whitespace-nowrap font-bold text-slate-900">ร้อยละเข้า</th>
                 </tr>
               </thead>
               <tbody>
                 {teacherSummaries.map((ts, idx) => (
                   <tr key={ts.teacher.id} className="hover:bg-slate-50 print:hover:bg-transparent">
-                    <td className="border border-slate-300 p-1 text-center">{idx + 1}</td>
-                    <td className="border border-slate-300 p-1 font-semibold text-slate-900 whitespace-nowrap">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center">{idx + 1}</td>
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-1 font-semibold text-slate-900 whitespace-nowrap">
                       {ts.teacher.prefix}{ts.teacher.fullName}
                     </td>
-                    <td className="border border-slate-300 p-1 text-slate-700 whitespace-nowrap">
-                      {ts.teacher.department.replace("กลุ่มสาระการเรียนรู้", "")}
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-1 text-slate-700 whitespace-nowrap">
+                      {shortenDept(ts.teacher.department)}
                     </td>
-                    <td className="border border-slate-300 p-1 text-center font-bold">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center font-bold">
                       {ts.total}
                     </td>
-                    <td className="border border-slate-300 p-1 text-center text-emerald-700 font-semibold">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center text-emerald-700 font-semibold">
                       {ts.onTime}
                     </td>
-                    <td className="border border-slate-300 p-1 text-center text-amber-700 font-semibold">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center text-amber-700 font-semibold">
                       {ts.late}
                     </td>
-                    <td className="border border-slate-300 p-1 text-center text-rose-700 font-bold">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center text-rose-700 font-bold">
                       {ts.absent}
                     </td>
-                    <td className="border border-slate-300 p-1 text-center text-slate-600">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center text-slate-600">
                       {ts.meeting > 0 ? ts.meeting : "-"}
                     </td>
-                    <td className="border border-slate-300 p-1 text-center text-slate-600">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center text-slate-600">
                       {ts.activity > 0 ? ts.activity : "-"}
                     </td>
-                    <td className="border border-slate-300 p-1 text-slate-700">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-1 text-slate-700">
                       {ts.other > 0 ? (
                         <div>
                           <span className="font-bold text-rose-700">{ts.other}</span>
                           {ts.otherNotes.length > 0 && (
-                            <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
-                              ({ts.otherNotes.join(", ")})
+                            <span className="text-[9px] text-slate-600 block leading-tight">
+                              ({ts.otherNotes.slice(0, 2).join(", ")})
                             </span>
                           )}
                         </div>
@@ -407,7 +431,7 @@ export default function OfficialPdfReport({
                         <div className="text-center text-slate-400">-</div>
                       )}
                     </td>
-                    <td className="border border-slate-300 p-1 text-center font-bold text-slate-800">
+                    <td className="border border-slate-300 p-1 print:py-0.5 print:px-0.5 text-center font-bold text-slate-800">
                       {ts.rate}
                     </td>
                   </tr>
@@ -415,7 +439,7 @@ export default function OfficialPdfReport({
 
                 {/* SUMMARY ROW: Rendered as the final row of tbody so it only prints once at the end of the entire table */}
                 <tr className="bg-slate-100 font-bold text-slate-900 text-center border-t-2 border-slate-400 print:bg-slate-100">
-                  <td colSpan={3} className="border border-slate-300 p-1.5 text-right whitespace-nowrap">
+                  <td colSpan={3} className="border border-slate-300 p-1 print:py-0.5 print:px-1 text-right whitespace-nowrap">
                     รวมทั้งโรงเรียน ({teacherSummaries.length} ท่าน):
                   </td>
                   <td className="border border-slate-300 p-1.5">{totalPeriods}</td>
@@ -564,15 +588,15 @@ export default function OfficialPdfReport({
               : "grid-cols-2 sm:grid-cols-4";
 
           return (
-            <div className="mt-10 pt-4 border-t border-slate-200 text-xs text-slate-700 break-inside-avoid">
-              <div className={`grid ${gridColsClass} gap-6 text-center`}>
+            <div className="mt-8 pt-3 print:mt-2 print:pt-1 border-t border-slate-200 text-xs text-slate-700 break-inside-avoid">
+              <div className={`grid ${gridColsClass} gap-4 sm:gap-6 text-center print:gap-2`}>
                 {signersList.map((signer) => (
-                  <div key={signer.id} className="space-y-1">
-                    <p className="font-semibold text-slate-800">{signer.roleTitle}</p>
-                    <div className="h-14"></div>
-                    <p className="font-medium">({signer.name || "..................................................."})</p>
-                    <p className="text-slate-500 text-[11px]">{signer.position}</p>
-                    <p className="text-slate-400 text-[10px]">
+                  <div key={signer.id} className="space-y-1 print:space-y-0.5">
+                    <p className="font-semibold text-slate-800 print:text-[8pt]">{signer.roleTitle}</p>
+                    <div className="h-12 print:h-6"></div>
+                    <p className="font-medium print:text-[8pt]">({signer.name || "..................................................."})</p>
+                    <p className="text-slate-500 text-[11px] print:text-[7pt]">{signer.position}</p>
+                    <p className="text-slate-400 text-[10px] print:text-[6.5pt]">
                       วันที่ ........ เดือน .................... พ.ศ. ............
                     </p>
                   </div>

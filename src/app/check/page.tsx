@@ -190,6 +190,9 @@ export default function StudentCheckPage() {
       // Check cached session
       const savedRoomId = sessionStorage.getItem("class_check_room_id");
       const savedStudent = sessionStorage.getItem("class_check_student");
+      const localSavedStudent = typeof window !== "undefined" ? localStorage.getItem("class_check_saved_student_name") : null;
+      const localSavedRoomId = typeof window !== "undefined" ? localStorage.getItem("class_check_saved_room_id") : null;
+
       if (savedRoomId && savedStudent) {
         setSelectedRoomId(savedRoomId);
         setStudentName(savedStudent);
@@ -227,6 +230,16 @@ export default function StudentCheckPage() {
           subList
         );
       } else if (typeof window !== "undefined") {
+        // Prefill saved room and student name on this device if available
+        if (localSavedStudent) {
+          setStudentName(localSavedStudent);
+        }
+        if (localSavedRoomId && !selectedRoomId) {
+          setSelectedRoomId(localSavedRoomId);
+          const r = clsList.find((c) => c.id === localSavedRoomId);
+          if (r) setSelectedGrade(r.grade);
+        }
+
         // Detect QR Code scan params (e.g. ?roomId=m1_1 or ?grade=ม.1&room=1)
         const params = new URLSearchParams(window.location.search);
         const qRoomId = params.get("roomId");
@@ -386,6 +399,8 @@ export default function StudentCheckPage() {
     setIsRoomAuthenticated(true);
     sessionStorage.setItem("class_check_room_id", selectedRoomId);
     sessionStorage.setItem("class_check_student", studentName.trim());
+    localStorage.setItem("class_check_saved_room_id", selectedRoomId);
+    localStorage.setItem("class_check_saved_student_name", studentName.trim());
 
     // Check if there are substitute assignments for this room today
     const todayStr = getThaiDateString();
@@ -416,10 +431,20 @@ export default function StudentCheckPage() {
     sessionStorage.removeItem("class_check_room_id");
     sessionStorage.removeItem("class_check_student");
     setIsRoomAuthenticated(false);
-    setSelectedGrade("");
-    setSelectedRoomId("");
     setPinInput("");
     setAutoDetectedNotice(null);
+
+    const localSavedStudent = typeof window !== "undefined" ? localStorage.getItem("class_check_saved_student_name") : null;
+    const localSavedRoomId = typeof window !== "undefined" ? localStorage.getItem("class_check_saved_room_id") : null;
+    if (localSavedStudent) setStudentName(localSavedStudent);
+    if (localSavedRoomId) {
+      setSelectedRoomId(localSavedRoomId);
+      const r = classrooms.find((c) => c.id === localSavedRoomId);
+      if (r) setSelectedGrade(r.grade);
+    } else {
+      setSelectedGrade("");
+      setSelectedRoomId("");
+    }
   };
 
   // Dynamic Timetable Synchronization (by room, date, and periodNumber)
@@ -497,10 +522,9 @@ export default function StudentCheckPage() {
         return;
       }
 
-      const isDouble = matchedTT.periodEnd > matchedTT.periodStart;
-      setIsDoublePeriod(isDouble);
-      setPeriodStart(matchedTT.periodStart);
-      setPeriodEnd(matchedTT.periodEnd);
+      setIsDoublePeriod(false);
+      setPeriodStart(periodNum);
+      setPeriodEnd(periodNum);
 
       // Match subject (matches by code OR id OR name, resilient to spacing and spelling)
       const cleanSubjCode = (matchedTT.subjectCode || "").replace(/\s+/g, "").toUpperCase();
@@ -583,9 +607,7 @@ export default function StudentCheckPage() {
         }
       }
 
-      const periodLabel = isDouble
-        ? `คาบคู่ ${matchedTT.periodStart}-${matchedTT.periodEnd}`
-        : `คาบที่ ${matchedTT.periodStart}`;
+      const periodLabel = `คาบที่ ${periodNum}`;
 
       const subInfo = activeSub
         ? ` ➡️ ครูผู้สอนแทน: ${activeSub.substituteTeacherName}`
@@ -617,16 +639,6 @@ export default function StudentCheckPage() {
     setPeriodStart(pNum);
     setPeriodEnd(pNum);
     syncWithTimetable(roomId, checkDate, pNum);
-  };
-
-  // Adjust period end when double period changes
-  const handleDoublePeriodToggle = (checked: boolean) => {
-    setIsDoublePeriod(checked);
-    if (checked) {
-      setPeriodEnd(Math.min(periodStart + 1, periods.length || 7));
-    } else {
-      setPeriodEnd(periodStart);
-    }
   };
 
   // Handle clicking a period button (immediately syncs timetable without carrying over previous state)
@@ -950,6 +962,41 @@ export default function StudentCheckPage() {
 
       if (editingRecord) {
         // Updating existing record within 7 days
+        const changes = [];
+        const statusLabels: Record<string, string> = {
+          on_time: "เข้าสอนตรงเวลา",
+          late: "เข้าสอนสาย (หลัง 10 นาที)",
+          absent: "ไม่เข้าสอน",
+        };
+        if (editingRecord.status !== status) {
+          changes.push({
+            field: "สถานะการเข้าสอน",
+            oldValue: statusLabels[editingRecord.status] || editingRecord.status,
+            newValue: statusLabels[status] || status,
+          });
+        }
+        const newTeacherName = teacher ? `${teacher.prefix}${teacher.fullName}` : editingRecord.teacherName;
+        if (editingRecord.teacherName !== newTeacherName) {
+          changes.push({
+            field: "ครูผู้สอน",
+            oldValue: editingRecord.teacherName,
+            newValue: newTeacherName,
+          });
+        }
+        if (status === "absent" && editingRecord.absenceReason !== absenceReason) {
+          changes.push({
+            field: "สาเหตุการไม่เข้าสอน",
+            oldValue: editingRecord.absenceReason || "-",
+            newValue: (absenceReason as string) || "-",
+          });
+        }
+
+        const newEditLog = {
+          timestamp: new Date().toISOString(),
+          editorName: `นักเรียน: ${studentName.trim()} (ห้อง ${room?.gradeRoom || editingRecord.gradeRoom})`,
+          changes: changes.length > 0 ? changes : [{ field: "บันทึกข้อมูลซ้ำ", oldValue: "-", newValue: "อัปเดต" }],
+        };
+
         const updatedRecord: AttendanceRecord = {
           ...editingRecord,
           date: checkDate,
@@ -963,7 +1010,7 @@ export default function StudentCheckPage() {
           subjectCode: resolvedCode || subject?.code || editingRecord.subjectCode || "",
           subjectName: resolvedName || subject?.name || editingRecord.subjectName || "",
           teacherId: selectedTeacherId,
-          teacherName: teacher ? `${teacher.prefix}${teacher.fullName}` : editingRecord.teacherName,
+          teacherName: newTeacherName,
           status,
           absenceReason: status === "absent" ? (absenceReason as AbsenceReason) : undefined,
           absenceNote: status === "absent" ? absenceNote.trim() : "",
@@ -973,6 +1020,7 @@ export default function StudentCheckPage() {
           substituteAssignmentId: isSub ? currentSubstitute?.id : undefined,
           updatedAt: new Date().toISOString(),
           updatedByStudent: studentName.trim(),
+          editHistory: [...(editingRecord.editHistory || []), newEditLog],
         };
 
         await updateAttendanceLog(updatedRecord);
@@ -1263,15 +1311,20 @@ export default function StudentCheckPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                ชื่อ-นามสกุล หรือ เลขที่ของนักเรียนผู้บันทึก <span className="text-rose-500">*</span>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
+                <span>ชื่อ-นามสกุล <span className="text-rose-500">*</span></span>
+                {typeof window !== "undefined" && localStorage.getItem("class_check_saved_student_name") && (
+                  <span className="text-[11px] text-emerald-600 font-normal">
+                    ✓ จดจำชื่อในเครื่องนี้แล้ว
+                  </span>
+                )}
               </label>
               <input
                 type="text"
                 disabled={Boolean(lockUntil && lockSecondsLeft > 0)}
                 value={studentName}
                 onChange={(e) => setStudentName(e.target.value)}
-                placeholder="เช่น ด.ช.ธนกฤต เลขที่ 1 (หัวหน้าห้อง)"
+                placeholder="เช่น ภัทราวรรณ  สุวรรณวาปี"
                 className={`w-full px-4 py-2.5 rounded-xl border text-sm transition-all ${
                   studentName.trim().length > 0
                     ? "border-2 border-emerald-600 bg-emerald-50/50 text-emerald-950 font-bold shadow-xs"
@@ -1477,24 +1530,6 @@ export default function StudentCheckPage() {
                     กลับสู่วันนี้
                   </button>
                 )}
-              </div>
-
-              {/* Double Period Toggle */}
-              <div className="mb-4 flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isDoublePeriod}
-                    onChange={(e) => handleDoublePeriodToggle(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"></div>
-                </label>
-                <div>
-                  <span className="text-sm font-semibold text-slate-800">
-                    เป็นวิชาคาบคู่ (2 คาบติดกัน)
-                  </span>
-                </div>
               </div>
 
               {/* Period Buttons / Selectors with Morning & Afternoon separation */}
