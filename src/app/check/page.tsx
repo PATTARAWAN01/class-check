@@ -971,7 +971,21 @@ export default function StudentCheckPage() {
           selectedTeacherId === currentSubstitute.substituteTeacherId
       );
 
-      if (editingRecord) {
+      // Auto-detect if record already exists for this room, date, and period (prevents duplicates & records audit log)
+      let recordToUpdate = editingRecord;
+      if (!recordToUpdate) {
+        const existing = allRoomLogs.find(
+          (r) =>
+            r.date === checkDate &&
+            (r.classroomId === selectedRoomId || r.gradeRoom === room?.gradeRoom) &&
+            !(periodEnd < r.periodStart || periodStart > r.periodEnd)
+        );
+        if (existing) {
+          recordToUpdate = existing;
+        }
+      }
+
+      if (recordToUpdate) {
         // Updating existing record within 7 days
         const changes = [];
         const statusLabels: Record<string, string> = {
@@ -979,54 +993,55 @@ export default function StudentCheckPage() {
           late: "เข้าสอนสาย (หลัง 10 นาที)",
           absent: "ไม่เข้าสอน",
         };
-        if (editingRecord.status !== status) {
+        if (recordToUpdate.status !== status) {
           changes.push({
             field: "สถานะการเข้าสอน",
-            oldValue: statusLabels[editingRecord.status] || editingRecord.status,
+            oldValue: statusLabels[recordToUpdate.status] || recordToUpdate.status,
             newValue: statusLabels[status] || status,
           });
         }
-        const newTeacherName = teacher ? `${teacher.prefix}${teacher.fullName}` : editingRecord.teacherName;
-        if (editingRecord.teacherName !== newTeacherName) {
+        const newTeacherName = teacher ? `${teacher.prefix}${teacher.fullName}` : recordToUpdate.teacherName;
+        if (recordToUpdate.teacherName !== newTeacherName) {
           changes.push({
             field: "ครูผู้สอน",
-            oldValue: editingRecord.teacherName,
+            oldValue: recordToUpdate.teacherName,
             newValue: newTeacherName,
           });
         }
-        if (status === "absent" && editingRecord.absenceNote !== absenceNote.trim()) {
+        if (status === "absent" && recordToUpdate.absenceNote !== absenceNote.trim()) {
           changes.push({
             field: "เหตุผลการไม่เข้าสอน",
-            oldValue: editingRecord.absenceNote || "-",
+            oldValue: recordToUpdate.absenceNote || "-",
             newValue: absenceNote.trim(),
           });
         }
-        if (status === "late" && editingRecord.lateNote !== lateNote.trim()) {
+        if (status === "late" && recordToUpdate.lateNote !== lateNote.trim()) {
           changes.push({
             field: "สาเหตุการเข้าสอนสาย",
-            oldValue: editingRecord.lateNote || "-",
+            oldValue: recordToUpdate.lateNote || "-",
             newValue: lateNote.trim(),
           });
         }
 
         const newEditLog = {
           timestamp: new Date().toISOString(),
-          editorName: `นักเรียน: ${studentName.trim()} (ห้อง ${room?.gradeRoom || editingRecord.gradeRoom})`,
-          changes: changes.length > 0 ? changes : [{ field: "บันทึกข้อมูลซ้ำ", oldValue: "-", newValue: "อัปเดต" }],
+          editorName: `นักเรียน: ${studentName.trim()} (ห้อง ${room?.gradeRoom || recordToUpdate.gradeRoom})`,
+          changes: changes.length > 0 ? changes : [{ field: "บันทึกแก้ไขข้อมูล", oldValue: "-", newValue: "อัปเดตข้อมูล" }],
+          clientIp: "ระบบเช็คชื่อนักเรียน",
         };
 
         const updatedRecord: AttendanceRecord = {
-          ...editingRecord,
+          ...recordToUpdate,
           date: checkDate,
           dayOfWeek,
           periodStart,
           periodEnd,
           periodCount,
           classroomId: selectedRoomId,
-          gradeRoom: room?.gradeRoom || editingRecord.gradeRoom,
+          gradeRoom: room?.gradeRoom || recordToUpdate.gradeRoom,
           subjectId: selectedSubjectId,
-          subjectCode: resolvedCode || subject?.code || editingRecord.subjectCode || "",
-          subjectName: resolvedName || subject?.name || editingRecord.subjectName || "",
+          subjectCode: resolvedCode || subject?.code || recordToUpdate.subjectCode || "",
+          subjectName: resolvedName || subject?.name || recordToUpdate.subjectName || "",
           teacherId: selectedTeacherId,
           teacherName: newTeacherName,
           status,
@@ -1039,7 +1054,7 @@ export default function StudentCheckPage() {
           substituteAssignmentId: isSub ? currentSubstitute?.id : undefined,
           updatedAt: new Date().toISOString(),
           updatedByStudent: studentName.trim(),
-          editHistory: [...(editingRecord.editHistory || []), newEditLog],
+          editHistory: [...(recordToUpdate.editHistory || []), newEditLog],
         };
 
         await updateAttendanceLog(updatedRecord);

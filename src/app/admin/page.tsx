@@ -2133,20 +2133,20 @@ export default function AdminPage() {
                               <button
                                 type="button"
                                 onClick={() => setHistoryViewRecord(log)}
-                                className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors border border-amber-300 shadow-xs"
-                                title="ดูประวัติการแก้ไขรายการนี้"
+                                className="mt-1 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 transition-colors border border-amber-300 shadow-xs cursor-pointer"
+                                title="คลิกเพื่อดูประวัติและรายละเอียดการแก้ไขทั้งหมด"
                               >
-                                <Clock className="w-2.5 h-2.5 text-amber-700" />
-                                <span>ประวัติแก้ไข ({log.editHistory.length})</span>
+                                <Clock className="w-3 h-3 text-amber-700" />
+                                <span>ประวัติแก้ไข ({log.editHistory.length} ครั้ง)</span>
                               </button>
                             ) : log.updatedAt ? (
                               <button
                                 type="button"
                                 onClick={() => setHistoryViewRecord(log)}
-                                className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors border border-amber-300 shadow-xs"
+                                className="mt-1 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 transition-colors border border-amber-300 shadow-xs cursor-pointer"
                                 title="คลิกเพื่อดูรายละเอียดการแก้ไข"
                               >
-                                <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                <Clock className="w-3 h-3 text-amber-700" />
                                 <span>แก้ไขเมื่อ {new Date(log.updatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</span>
                               </button>
                             ) : null}
