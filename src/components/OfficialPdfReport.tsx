@@ -16,6 +16,9 @@ interface OfficialPdfReportProps {
   records: AttendanceRecord[];
   allRecords?: AttendanceRecord[];
   initialDate?: string;
+  initialStartDate?: string;
+  initialEndDate?: string;
+  initialViewMode?: "single" | "range";
   dateRangeLabel?: string;
   onClose: () => void;
 }
@@ -29,26 +32,58 @@ export default function OfficialPdfReport({
   records,
   allRecords,
   initialDate,
+  initialStartDate,
+  initialEndDate,
+  initialViewMode,
   dateRangeLabel = "",
   onClose,
 }: OfficialPdfReportProps) {
-  const [selectedDate, setSelectedDate] = useState(() => initialDate || getThaiDateString());
+  const [viewMode, setViewMode] = useState<"single" | "range">(() => {
+    if (initialViewMode) return initialViewMode;
+    if (initialStartDate && initialEndDate && initialStartDate !== initialEndDate) return "range";
+    if (dateRangeLabel && (dateRangeLabel.includes("ช่วง") || dateRangeLabel.includes("สัปดาห์") || dateRangeLabel.includes("เดือน"))) return "range";
+    return "range";
+  });
+
+  const [singleDate, setSingleDate] = useState(() => initialDate || getThaiDateString());
+  const [rangeStartDate, setRangeStartDate] = useState(() => initialStartDate || getThaiOffsetDate(7));
+  const [rangeEndDate, setRangeEndDate] = useState(() => initialEndDate || getThaiDateString());
   const [isExportingImage, setIsExportingImage] = useState(false);
+
+  // Find the earliest date in records for "Both/Full Term" shortcut
+  const earliestRecordDate = useMemo(() => {
+    const pool = allRecords && allRecords.length > 0 ? allRecords : records;
+    if (!pool.length) return getThaiOffsetDate(90);
+    const dates = pool.map((r) => r.date).filter(Boolean).sort();
+    return dates[0] || getThaiOffsetDate(90);
+  }, [allRecords, records]);
 
   // Filter records dynamically when allRecords is supplied
   const effectiveRecords = useMemo(() => {
-    if (allRecords && allRecords.length > 0) {
+    const pool = allRecords && allRecords.length > 0 ? allRecords : records;
+
+    return pool.filter((r) => {
+      // 1. Term filter (if specified)
+      if (term?.id && r.termId && r.termId !== term.id) return false;
+
+      // 2. Teacher filter (if single teacher modal)
       if (teacher) {
-        return allRecords.filter(
-          (r) =>
-            (r.teacherId === teacher.id || r.teacherName.includes(teacher.fullName)) &&
-            r.date === selectedDate
-        );
+        const matchesTeacher =
+          r.teacherId === teacher.id ||
+          (teacher.fullName && r.teacherName && r.teacherName.includes(teacher.fullName));
+        if (!matchesTeacher) return false;
       }
-      return allRecords.filter((r) => r.date === selectedDate);
-    }
-    return records;
-  }, [allRecords, records, selectedDate, teacher]);
+
+      // 3. Date filtering based on viewMode
+      if (viewMode === "single") {
+        return r.date === singleDate;
+      } else {
+        if (rangeStartDate && r.date < rangeStartDate) return false;
+        if (rangeEndDate && r.date > rangeEndDate) return false;
+        return true;
+      }
+    });
+  }, [allRecords, records, term, teacher, viewMode, singleDate, rangeStartDate, rangeEndDate]);
 
   // Clean and deduplicate records to eliminate accidental duplicate check-ins
   const cleanRecords = useMemo(() => deduplicateAttendanceRecords(effectiveRecords), [effectiveRecords]);
@@ -156,9 +191,9 @@ export default function OfficialPdfReport({
           else if (r.status === "late") {
             tLate += count;
             if (r.lateNote && r.lateNote.trim()) {
-              tLateNotes.push(
-                r.gradeRoom ? `${r.lateNote.trim()} (${r.gradeRoom})` : r.lateNote.trim()
-              );
+              const datePrefix = viewMode === "range" && r.date ? `${formatThaiDateShort(r.date)}: ` : "";
+              const roomSuffix = r.gradeRoom ? ` (${r.gradeRoom})` : "";
+              tLateNotes.push(`${datePrefix}${r.lateNote.trim()}${roomSuffix}`);
             }
           }
           else if (r.status === "absent") {
@@ -176,9 +211,9 @@ export default function OfficialPdfReport({
               "ไม่ระบุเหตุผล"
             );
 
-            tAbsentNotes.push(
-              r.gradeRoom ? `${noteText} (${r.gradeRoom})` : noteText
-            );
+            const datePrefix = viewMode === "range" && r.date ? `${formatThaiDateShort(r.date)}: ` : "";
+            const roomSuffix = r.gradeRoom ? ` (${r.gradeRoom})` : "";
+            tAbsentNotes.push(`${datePrefix}${noteText}${roomSuffix}`);
           }
         });
 
@@ -205,11 +240,17 @@ export default function OfficialPdfReport({
       .sort((a, b) =>
         a.teacher.code.localeCompare(b.teacher.code, undefined, { numeric: true })
       );
-  }, [teacher, teachers, cleanRecords, timetable]);
+  }, [teacher, teachers, cleanRecords, timetable, viewMode]);
 
-  const pdfFileName = teacher
-    ? `รายงานการเข้าสอน_${teacher.fullName.replace(/\s+/g, "_")}_${selectedDate}`
-    : `รายงานสรุปภาพรวมการปฏิบัติการสอน_${selectedDate}`;
+  const pdfFileName = useMemo(() => {
+    const dateStr =
+      viewMode === "single"
+        ? singleDate
+        : `${rangeStartDate}_ถึง_${rangeEndDate}`;
+    return teacher
+      ? `รายงานการเข้าสอน_${teacher.fullName.replace(/\s+/g, "_")}_${dateStr}`
+      : `รายงานสรุปภาพรวมการปฏิบัติการสอน_${dateStr}`;
+  }, [teacher, viewMode, singleDate, rangeStartDate, rangeEndDate]);
 
   useEffect(() => {
     const prevTitle = document.title;
@@ -290,7 +331,7 @@ export default function OfficialPdfReport({
             @media print {
               @page {
                 size: A4 portrait !important;
-                margin: 4mm 5mm 4mm 5mm !important;
+                margin: 8mm 6mm 6mm 6mm !important;
               }
               html, body {
                 margin: 0 !important;
@@ -302,6 +343,7 @@ export default function OfficialPdfReport({
               }
               .report-document-sheet {
                 padding: 0 !important;
+                padding-top: 2.5mm !important;
                 margin: 0 auto !important;
                 box-shadow: none !important;
                 max-width: 100% !important;
@@ -344,32 +386,132 @@ export default function OfficialPdfReport({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Date Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-700 text-xs">
-            <span className="text-slate-400 text-[11px]">วันที่:</span>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
-            />
+          {/* Mode Switcher Pill */}
+          <div className="flex items-center bg-slate-800 p-0.5 rounded-xl border border-slate-700">
             <button
               type="button"
-              onClick={() => setSelectedDate(getThaiDateString())}
-              className="px-1.5 py-0.5 rounded-md bg-sky-950/90 hover:bg-sky-900 text-sky-300 text-[10px] font-medium border border-sky-700/60 transition-colors"
-              title="เลือกวันนี้"
+              onClick={() => setViewMode("single")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === "single"
+                  ? "bg-sky-600 text-white shadow-sm"
+                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+              }`}
             >
-              วันนี้
+              📆 รายวัน (1 วัน)
             </button>
             <button
               type="button"
-              onClick={() => setSelectedDate(getThaiOffsetDate(1))}
-              className="px-1.5 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-medium transition-colors"
-              title="เลือกเมื่อวาน"
+              onClick={() => setViewMode("range")}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === "range"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-300 hover:text-white hover:bg-slate-700/50"
+              }`}
             >
-              เมื่อวาน
+              📅 ช่วงเวลา (สะสม)
             </button>
           </div>
+
+          {/* Date Selector(s) based on ViewMode */}
+          {viewMode === "single" ? (
+            <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-700 text-xs">
+              <span className="text-slate-400 text-[11px]">วันที่:</span>
+              <input
+                type="date"
+                value={singleDate}
+                onChange={(e) => setSingleDate(e.target.value)}
+                className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => setSingleDate(getThaiDateString())}
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors ${
+                  singleDate === getThaiDateString()
+                    ? "bg-sky-600 text-white border-sky-500"
+                    : "bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600"
+                }`}
+                title="เลือกวันนี้"
+              >
+                วันนี้
+              </button>
+              <button
+                type="button"
+                onClick={() => setSingleDate(getThaiOffsetDate(1))}
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors ${
+                  singleDate === getThaiOffsetDate(1)
+                    ? "bg-sky-600 text-white border-sky-500"
+                    : "bg-slate-700 hover:bg-slate-600 text-slate-200 border-slate-600"
+                }`}
+                title="เลือกเมื่อวาน"
+              >
+                เมื่อวาน
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-700 text-xs">
+              <span className="text-slate-400 text-[11px]">ตั้งแต่:</span>
+              <input
+                type="date"
+                value={rangeStartDate}
+                onChange={(e) => setRangeStartDate(e.target.value)}
+                className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
+              />
+              <span className="text-slate-400 text-[11px]">ถึง:</span>
+              <input
+                type="date"
+                value={rangeEndDate}
+                onChange={(e) => setRangeEndDate(e.target.value)}
+                className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
+              />
+              <div className="flex items-center gap-1 pl-1 border-l border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRangeStartDate(getThaiOffsetDate(7));
+                    setRangeEndDate(getThaiDateString());
+                  }}
+                  className="px-1.5 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-medium transition-colors"
+                  title="7 วันล่าสุด"
+                >
+                  7 วัน
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = getThaiDateString();
+                    setRangeStartDate(`${today.substring(0, 7)}-01`);
+                    setRangeEndDate(today);
+                  }}
+                  className="px-1.5 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-medium transition-colors"
+                  title="ประจำเดือนนี้"
+                >
+                  เดือนนี้
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRangeStartDate(getThaiOffsetDate(30));
+                    setRangeEndDate(getThaiDateString());
+                  }}
+                  className="px-1.5 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-medium transition-colors"
+                  title="30 วันล่าสุด"
+                >
+                  30 วัน
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRangeStartDate(earliestRecordDate);
+                    setRangeEndDate(getThaiDateString());
+                  }}
+                  className="px-1.5 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-medium transition-colors"
+                  title="ทั้งภาคเรียน (ข้อมูลทั้งหมดที่มีในระบบ)"
+                >
+                  ทั้งเทอม
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Save as PNG Image Button */}
           <button
@@ -417,8 +559,8 @@ export default function OfficialPdfReport({
         >
           {/* Document Header (Standardized Format) */}
           <div className="text-center border-b-2 border-slate-900 pb-3 mb-3 print:pb-1 print:mb-1">
-            {/* Line 1: Logo (Enlarged and balanced) */}
-            <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-1 flex items-center justify-center print:w-12 print:h-12 print:mb-0.5">
+            {/* Line 1: Logo (Enlarged and balanced with top headroom to prevent PDF clipping) */}
+            <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-1 flex items-center justify-center print:w-12 print:h-12 print:mb-0.5 print:pt-1">
               <img
                 src={schoolProfile.logoUrl || "/LOGO-N.png"}
                 alt="ตราโรงเรียนหนองวัวซอพิทยาคม"
@@ -443,7 +585,15 @@ export default function OfficialPdfReport({
 
             {/* Line 4: Term & Short Thai Date */}
             <p className="text-xs sm:text-sm text-slate-600 mt-0.5 print:text-[6.8pt] print:leading-tight print:mt-0 font-medium">
-              ภาคเรียนที่ {term?.term || "2"} ปีการศึกษา {term?.year || "2569"} &bull; ประจำ{formatThaiDateLong(selectedDate)} (วันที่ {selectedDate})
+              ภาคเรียนที่ {term?.term || "2"} ปีการศึกษา {term?.year || "2569"} &bull;{" "}
+              {viewMode === "single" ? (
+                <>ประจำ{formatThaiDateLong(singleDate)} (วันที่ {singleDate})</>
+              ) : (
+                <>
+                  ข้อมูลสะสมระหว่างวันที่ {formatThaiDateShort(rangeStartDate)} ถึง{" "}
+                  {formatThaiDateShort(rangeEndDate)}
+                </>
+              )}
             </p>
 
             {teacher && (
@@ -617,7 +767,8 @@ export default function OfficialPdfReport({
                           <div key={i} className="flex items-start gap-1">
                             <span className="text-amber-500 font-bold">&bull;</span>
                             <span className="truncate">
-                              <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}):{" "}
+                              <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}
+                              {viewMode === "range" && item.date ? ` • ${formatThaiDateShort(item.date)}` : ""}):{" "}
                               <span className="font-semibold text-amber-800 bg-amber-50 px-1 rounded">{item.note}</span>
                             </span>
                           </div>
@@ -636,7 +787,8 @@ export default function OfficialPdfReport({
                           <div key={i} className="flex items-start gap-1">
                             <span className="text-rose-500 font-bold">&bull;</span>
                             <span className="truncate">
-                              <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}):{" "}
+                              <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}
+                              {viewMode === "range" && item.date ? ` • ${formatThaiDateShort(item.date)}` : ""}):{" "}
                               <span className="font-bold text-rose-800 bg-rose-50 px-1 rounded">{item.note}</span>
                             </span>
                           </div>
@@ -651,7 +803,7 @@ export default function OfficialPdfReport({
             /* ==================== 2. SINGLE TEACHER DETAIL TABLE ==================== */
             <div className="mb-6">
               <h3 className="font-bold text-slate-900 mb-2 text-sm">
-                รายละเอียดบันทึกการเข้าสอนแต่ละคาบ ({records.length} รายการ)
+                รายละเอียดบันทึกการเข้าสอนแต่ละคาบ ({cleanRecords.length} รายการ)
               </h3>
               <table className="w-full text-left text-xs print:text-[11px] border-collapse border border-slate-300">
                 <thead>
@@ -667,7 +819,7 @@ export default function OfficialPdfReport({
                   </tr>
                 </thead>
                 <tbody>
-                  {records.length === 0 ? (
+                  {cleanRecords.length === 0 ? (
                     <tr>
                       <td
                         colSpan={8}
@@ -677,7 +829,7 @@ export default function OfficialPdfReport({
                       </td>
                     </tr>
                   ) : (
-                    records.map((r, idx) => (
+                    cleanRecords.map((r, idx) => (
                       <tr key={r.id} className="hover:bg-slate-50">
                         <td className="border border-slate-300 p-1.5 text-center">{idx + 1}</td>
                         <td className="border border-slate-300 p-1.5 text-center">{r.date}</td>

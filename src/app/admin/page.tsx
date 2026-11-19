@@ -4233,20 +4233,52 @@ export default function AdminPage() {
       {/* ========================================================== */}
       {/* OFFICIAL PDF REPORT MODAL PREVIEW */}
       {/* ========================================================== */}
-      {pdfModalOpen && (
-        <OfficialPdfReport
-          schoolProfile={schoolProfile}
-          term={currentPdfTermObj}
-          teacher={selectedTeacherObj}
-          teachers={teachers}
-          timetable={timetable}
-          records={filteredPdfRecords}
-          allRecords={attendanceLogs}
-          initialDate={getThaiDateString()}
-          dateRangeLabel={pdfDateRangeLabel}
-          onClose={() => setPdfModalOpen(false)}
-        />
-      )}
+      {pdfModalOpen && (() => {
+        const todayStr = getThaiDateString();
+        let initStart = pdfStartDate;
+        let initEnd = pdfEndDate;
+        let initMode: "single" | "range" = "range";
+
+        if (pdfTimeRange === "week") {
+          initStart = getThaiOffsetDate(7);
+          initEnd = todayStr;
+          initMode = "range";
+        } else if (pdfTimeRange === "month") {
+          initStart = `${todayStr.substring(0, 7)}-01`;
+          initEnd = todayStr;
+          initMode = "range";
+        } else if (pdfTimeRange === "term") {
+          const termRecords = attendanceLogs.filter(
+            (r) => !pdfTermId || r.termId === pdfTermId
+          );
+          const dates = termRecords.map((r) => r.date).filter(Boolean).sort();
+          initStart = dates[0] || getThaiOffsetDate(90);
+          initEnd = dates[dates.length - 1] || todayStr;
+          initMode = "range";
+        } else if (pdfTimeRange === "custom") {
+          initStart = pdfStartDate;
+          initEnd = pdfEndDate;
+          initMode = pdfStartDate === pdfEndDate ? "single" : "range";
+        }
+
+        return (
+          <OfficialPdfReport
+            schoolProfile={schoolProfile}
+            term={currentPdfTermObj}
+            teacher={selectedTeacherObj}
+            teachers={teachers}
+            timetable={timetable}
+            records={filteredPdfRecords}
+            allRecords={attendanceLogs}
+            initialDate={initMode === "single" ? initStart : todayStr}
+            initialStartDate={initStart}
+            initialEndDate={initEnd}
+            initialViewMode={initMode}
+            dateRangeLabel={pdfDateRangeLabel}
+            onClose={() => setPdfModalOpen(false)}
+          />
+        );
+      })()}
 
       {/* ========================================================== */}
       {/* CLASSROOM QR CODE PRINT MODAL */}

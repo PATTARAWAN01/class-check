@@ -200,7 +200,7 @@ export default function ClassroomPeriodMatrixModal({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 4mm 5mm 4mm 5mm;
+            margin: 6mm 5mm 4mm 5mm;
           }
           html, body {
             background: white !important;
@@ -355,7 +355,7 @@ export default function ClassroomPeriodMatrixModal({
               <img
                 src={schoolProfile.logoUrl || "/LOGO-N.png"}
                 alt="ตราโรงเรียนหนองวัวซอพิทยาคม"
-                className="w-14 h-14 object-contain mx-auto print:w-12 print:h-12"
+                className="w-14 h-14 object-contain mx-auto print:w-12 print:h-12 print:pt-1"
               />
               {/* Line 2: Title */}
               <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
