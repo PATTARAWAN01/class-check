@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
-import { Printer, X, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Printer, X, Image as ImageIcon, Loader2, Calendar } from "lucide-react";
 import { AcademicTerm, AttendanceRecord, SchoolProfile, Teacher, TimetableEntry } from "@/types";
-import { getThaiDateString, formatThaiDateShort } from "@/lib/dateUtils";
+import { getThaiDateString, getThaiOffsetDate, formatThaiDateShort, formatThaiDateLong } from "@/lib/dateUtils";
 import { getEffectivePeriodCount, deduplicateAttendanceRecords } from "@/lib/attendanceUtils";
 import { toPng } from "html-to-image";
 
@@ -14,7 +14,9 @@ interface OfficialPdfReportProps {
   teachers?: Teacher[]; // All teachers list for overview report
   timetable?: TimetableEntry[];
   records: AttendanceRecord[];
-  dateRangeLabel: string;
+  allRecords?: AttendanceRecord[];
+  initialDate?: string;
+  dateRangeLabel?: string;
   onClose: () => void;
 }
 
@@ -25,13 +27,31 @@ export default function OfficialPdfReport({
   teachers = [],
   timetable = [],
   records,
-  dateRangeLabel,
+  allRecords,
+  initialDate,
+  dateRangeLabel = "",
   onClose,
 }: OfficialPdfReportProps) {
+  const [selectedDate, setSelectedDate] = useState(() => initialDate || getThaiDateString());
   const [isExportingImage, setIsExportingImage] = useState(false);
 
+  // Filter records dynamically when allRecords is supplied
+  const effectiveRecords = useMemo(() => {
+    if (allRecords && allRecords.length > 0) {
+      if (teacher) {
+        return allRecords.filter(
+          (r) =>
+            (r.teacherId === teacher.id || r.teacherName.includes(teacher.fullName)) &&
+            r.date === selectedDate
+        );
+      }
+      return allRecords.filter((r) => r.date === selectedDate);
+    }
+    return records;
+  }, [allRecords, records, selectedDate, teacher]);
+
   // Clean and deduplicate records to eliminate accidental duplicate check-ins
-  const cleanRecords = useMemo(() => deduplicateAttendanceRecords(records), [records]);
+  const cleanRecords = useMemo(() => deduplicateAttendanceRecords(effectiveRecords), [effectiveRecords]);
 
   // Aggregate statistics for this report
   let totalPeriods = 0;
@@ -160,8 +180,8 @@ export default function OfficialPdfReport({
   }, [teacher, teachers, cleanRecords, timetable]);
 
   const pdfFileName = teacher
-    ? `รายงานการเข้าสอน_${teacher.fullName.replace(/\s+/g, "_")}_${getThaiDateString()}`
-    : `รายงานการเข้าสอนภาพรวม_${getThaiDateString()}`;
+    ? `รายงานการเข้าสอน_${teacher.fullName.replace(/\s+/g, "_")}_${selectedDate}`
+    : `รายงานสรุปภาพรวมการปฏิบัติการสอน_${selectedDate}`;
 
   useEffect(() => {
     const prevTitle = document.title;
@@ -188,19 +208,24 @@ export default function OfficialPdfReport({
       setIsExportingImage(true);
       if (modal) modal.scrollLeft = 0;
 
+      // Ultra-HD capture: 300 DPI+ quality with min width 1280px
       const fullHeight = element.scrollHeight;
-      const fullWidth = element.scrollWidth;
+      const fullWidth = Math.max(element.scrollWidth, 1280);
 
       const dataUrl = await toPng(element, {
-        quality: 0.95,
+        quality: 1.0,
         backgroundColor: "#ffffff",
-        pixelRatio: 2,
+        pixelRatio: 3.5,
         height: fullHeight,
         width: fullWidth,
         style: {
+          width: `${fullWidth}px`,
+          minWidth: `${fullWidth}px`,
+          height: `${fullHeight}px`,
+          maxHeight: "none",
+          overflow: "visible",
           margin: "0",
           transform: "none",
-          maxWidth: "none",
         },
       });
       const link = document.createElement("a");
@@ -274,51 +299,91 @@ export default function OfficialPdfReport({
         }}
       />
 
-      {/* Floating Action Controls (Hidden on Print) */}
-      <div className="fixed top-3 left-3 sm:left-auto sm:top-4 sm:right-4 z-50 flex items-center gap-2 sm:gap-3 no-print max-w-[calc(100vw-24px)] overflow-x-auto">
-        <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-200 bg-slate-900/90 px-3.5 py-2 rounded-xl shadow-lg border border-slate-700">
-          <span>💡 เพื่อความสะอาดของเอกสาร: ในหน้าต่างพิมพ์ ให้เอาเครื่องหมายถูกที่ <strong>"หัวกระดาษและท้ายกระดาษ" (Headers & Footers)</strong> ออก</span>
+      {/* Sticky Action Controls (Hidden on Print) */}
+      <div className="sticky top-2 z-50 mb-3 bg-slate-900/95 text-white p-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-2xl border border-slate-700 flex flex-wrap items-center justify-between gap-2.5 no-print max-w-5xl mx-auto backdrop-blur-md">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
+            <Calendar className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-xs sm:text-sm font-bold leading-tight">
+              {teacher
+                ? `รายงานผลการสอน: ${teacher.prefix}${teacher.fullName}`
+                : "รายงานสรุปภาพรวมการปฏิบัติการสอนของครูทุกคน"}
+            </h2>
+            <p className="text-[10.5px] text-slate-400 hidden sm:block">
+              {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"} &bull; กลุ่มบริหารงานวิชาการ
+            </p>
+          </div>
         </div>
-        <div className="sm:hidden flex items-center gap-1 text-[11px] text-slate-200 bg-slate-900/90 px-2.5 py-1.5 rounded-xl shadow-lg border border-slate-700 whitespace-nowrap">
-          <span>📱</span>
-          <span>เลื่อนซ้าย-ขวา หรือหมุนจอนอน</span>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Date Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-700 text-xs">
+            <span className="text-slate-400 text-[11px]">วันที่:</span>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => setSelectedDate(getThaiDateString())}
+              className="px-1.5 py-0.5 rounded-md bg-sky-950/90 hover:bg-sky-900 text-sky-300 text-[10px] font-medium border border-sky-700/60 transition-colors"
+              title="เลือกวันนี้"
+            >
+              วันนี้
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDate(getThaiOffsetDate(1))}
+              className="px-1.5 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-medium transition-colors"
+              title="เลือกเมื่อวาน"
+            >
+              เมื่อวาน
+            </button>
+          </div>
+
+          {/* Save as PNG Image Button */}
+          <button
+            type="button"
+            onClick={handleExportImage}
+            disabled={isExportingImage}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all active:scale-95"
+            title="บันทึกรายงานเป็นรูปภาพ PNG ความละเอียดสูง (Ultra-HD 300 DPI)"
+          >
+            {isExportingImage ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span>{isExportingImage ? "กำลังบันทึกภาพ..." : "📷 บันทึกรูปภาพ (PNG)"}</span>
+          </button>
+
+          {/* Print / PDF Button */}
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all active:scale-95"
+          >
+            <Printer className="w-3.5 h-3.5 shrink-0" />
+            <span>สั่งพิมพ์ / PDF</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0"
+            title="ปิด"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
-
-        {/* Save as PNG Image Button */}
-        <button
-          onClick={handleExportImage}
-          disabled={isExportingImage}
-          className="px-3.5 sm:px-4 py-2 sm:py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-lg flex items-center gap-1.5 sm:gap-2 transition-all active:scale-95 whitespace-nowrap"
-          title="บันทึกรายงานเป็นรูปภาพ PNG"
-        >
-          {isExportingImage ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <ImageIcon className="w-4 h-4 shrink-0" />
-          )}
-          <span>{isExportingImage ? "กำลังบันทึกภาพ..." : "📷 บันทึกเป็นรูปภาพ (PNG)"}</span>
-        </button>
-
-        {/* Print / PDF Button */}
-        <button
-          onClick={handlePrint}
-          className="px-3.5 sm:px-4 py-2 sm:py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-semibold rounded-xl shadow-lg flex items-center gap-1.5 sm:gap-2 transition-all active:scale-95 whitespace-nowrap"
-        >
-          <Printer className="w-4 h-4 shrink-0" />
-          <span>สั่งพิมพ์ / PDF</span>
-        </button>
-
-        <button
-          onClick={onClose}
-          className="p-2 sm:p-2.5 bg-white/90 hover:bg-white text-slate-700 hover:text-slate-900 rounded-xl shadow-lg transition-colors shrink-0"
-          title="ปิด"
-        >
-          <X className="w-5 h-5" />
-        </button>
       </div>
 
       {/* Centering and Mobile Horizontal Panning Wrapper */}
-      <div className="min-w-fit w-full flex justify-start sm:justify-center pt-14 pb-8 sm:py-6">
+      <div className="min-w-fit w-full flex justify-start sm:justify-center pb-8 sm:pb-6 pt-1">
         {/* Official A4 Document Container */}
         <div
           id="official-report-sheet"
@@ -351,8 +416,8 @@ export default function OfficialPdfReport({
             </h1>
 
             {/* Line 4: Term & Short Thai Date */}
-            <p className="text-xs sm:text-sm text-slate-600 mt-0.5 print:text-[6.8pt] print:leading-tight print:mt-0">
-              ภาคเรียนที่ {term?.term || "2"} ปีการศึกษา {term?.year || "2569"} &bull; วันที่ {formatThaiDateShort(getThaiDateString())} ({dateRangeLabel})
+            <p className="text-xs sm:text-sm text-slate-600 mt-0.5 print:text-[6.8pt] print:leading-tight print:mt-0 font-medium">
+              ภาคเรียนที่ {term?.term || "2"} ปีการศึกษา {term?.year || "2569"} &bull; ประจำ{formatThaiDateLong(selectedDate)} (วันที่ {selectedDate})
             </p>
 
             {teacher && (

@@ -4241,6 +4241,8 @@ export default function AdminPage() {
           teachers={teachers}
           timetable={timetable}
           records={filteredPdfRecords}
+          allRecords={attendanceLogs}
+          initialDate={getThaiDateString()}
           dateRangeLabel={pdfDateRangeLabel}
           onClose={() => setPdfModalOpen(false)}
         />

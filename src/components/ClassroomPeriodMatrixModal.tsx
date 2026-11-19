@@ -10,7 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Classroom, AttendanceRecord, SchoolProfile, TimetableEntry } from "@/types";
-import { formatThaiDateLong, formatThaiDateShort, getThaiDateString } from "@/lib/dateUtils";
+import { formatThaiDateLong, formatThaiDateShort, getThaiDateString, getThaiOffsetDate } from "@/lib/dateUtils";
 import { getSpecialNonCheckedPeriodInfo } from "@/lib/attendanceUtils";
 import { toPng } from "html-to-image";
 
@@ -71,14 +71,14 @@ export default function ClassroomPeriodMatrixModal({
     if (!element) return;
     try {
       setIsExportingImage(true);
-      // Ensure full scroll height and width are captured completely without viewport clipping
+      // Ensure high resolution canvas (300 DPI+ quality) and full width capture
       const fullHeight = element.scrollHeight;
-      const fullWidth = Math.max(element.scrollWidth, 980);
+      const fullWidth = Math.max(element.scrollWidth, 1280);
 
       const dataUrl = await toPng(element, {
-        quality: 0.95,
+        quality: 1.0,
         backgroundColor: "#ffffff",
-        pixelRatio: 2,
+        pixelRatio: 3.5,
         height: fullHeight,
         width: fullWidth,
         style: {
@@ -209,8 +209,10 @@ export default function ClassroomPeriodMatrixModal({
             color: black !important;
             margin: 0 !important;
             padding: 0 !important;
-            font-size: 8pt !important;
-            font-family: 'TH Sarabun New', 'Sarabun', sans-serif !important;
+            font-size: 8.8pt !important;
+            font-family: 'Sarabun', 'TH Sarabun New', sans-serif !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .no-print {
             display: none !important;
@@ -221,16 +223,24 @@ export default function ClassroomPeriodMatrixModal({
             padding: 0 !important;
             width: 100% !important;
             max-width: 100% !important;
-            font-family: 'TH Sarabun New', 'Sarabun', sans-serif !important;
+            font-family: 'Sarabun', 'TH Sarabun New', sans-serif !important;
           }
           .matrix-table {
             border-collapse: collapse !important;
             width: 100% !important;
           }
-          .matrix-table th, .matrix-table td {
-            border: 1px solid #475569 !important;
+          .matrix-table th {
+            background-color: #e0f2fe !important;
+            color: #082f49 !important;
+            border: 1px solid #94a3b8 !important;
+            padding: 3px 2px !important;
+            font-size: 9pt !important;
+            font-weight: bold !important;
+          }
+          .matrix-table td {
+            border: 1px solid #94a3b8 !important;
             padding: 1.5px 2px !important;
-            line-height: 1.1 !important;
+            line-height: 1.15 !important;
           }
           .avoid-break {
             page-break-inside: avoid !important;
@@ -266,6 +276,22 @@ export default function ClassroomPeriodMatrixModal({
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
               />
+              <button
+                type="button"
+                onClick={() => setSelectedDate(getThaiDateString())}
+                className="px-1.5 py-0.5 rounded-md bg-sky-950/90 hover:bg-sky-900 text-sky-300 text-[10px] font-medium border border-sky-700/60 transition-colors"
+                title="เลือกวันนี้"
+              >
+                วันนี้
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDate(getThaiOffsetDate(1))}
+                className="px-1.5 py-0.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-medium transition-colors"
+                title="เลือกเมื่อวาน"
+              >
+                เมื่อวาน
+              </button>
             </div>
 
             {/* Grade Filter */}
@@ -379,16 +405,16 @@ export default function ClassroomPeriodMatrixModal({
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse border border-slate-300 matrix-table">
               <thead>
-                <tr className="bg-slate-800 text-white font-bold text-center text-[10px] sm:text-xs">
-                  <th className="p-1 border border-slate-300 w-14 min-w-[56px] text-center">ห้องเรียน</th>
-                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 1<br/><span className="text-[8px] font-normal text-slate-300">08:40-09:30</span></th>
-                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 2<br/><span className="text-[8px] font-normal text-slate-300">09:30-10:20</span></th>
-                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 3<br/><span className="text-[8px] font-normal text-slate-300">10:20-11:10</span></th>
-                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 4<br/><span className="text-[8px] font-normal text-slate-300">11:10-12:00</span></th>
-                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 5<br/><span className="text-[8px] font-normal text-slate-300">13:00-13:50</span></th>
-                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 6<br/><span className="text-[8px] font-normal text-slate-300">13:50-14:40</span></th>
-                  <th className="p-1 border border-slate-300 w-[11.5%]">คาบ 7<br/><span className="text-[8px] font-normal text-slate-300">14:40-15:30</span></th>
-                  <th className="p-1 border border-slate-300 w-16 min-w-[64px] text-center">ความคืบหน้า</th>
+                <tr className="bg-sky-100 text-sky-950 font-bold text-center text-xs print:bg-sky-100">
+                  <th className="p-1.5 border border-slate-300 w-14 min-w-[52px] text-center">ห้องเรียน</th>
+                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 1</th>
+                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 2</th>
+                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 3</th>
+                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 4</th>
+                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 5</th>
+                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 6</th>
+                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 7</th>
+                  <th className="p-1.5 border border-slate-300 w-11 min-w-[42px] text-center">สรุป</th>
                 </tr>
               </thead>
               <tbody>
@@ -404,7 +430,7 @@ export default function ClassroomPeriodMatrixModal({
                         isNewGrade && idx > 0 ? "border-t-2 border-slate-400" : ""
                       }`}
                     >
-                      <td className="p-1 border border-slate-300 font-bold bg-slate-50 text-slate-900 text-center whitespace-nowrap">
+                      <td className="p-1 border border-slate-300 font-bold bg-slate-50 text-slate-900 text-center whitespace-nowrap text-xs">
                         {cls.gradeRoom}
                       </td>
 
@@ -427,13 +453,13 @@ export default function ClassroomPeriodMatrixModal({
                               >
                                 <div className="flex flex-col items-center justify-center leading-tight">
                                   <div className="flex items-center justify-center gap-0.5 font-bold">
-                                    <span className="text-[8.5px] text-emerald-700 font-bold shrink-0">●</span>
-                                    <span className="text-[8.5px] font-bold tracking-tight truncate max-w-[72px]">
+                                    <span className="text-[10px] text-emerald-700 font-bold shrink-0">●</span>
+                                    <span className="text-[10px] sm:text-[10.5px] font-bold tracking-tight text-slate-900 truncate max-w-[85px]">
                                       {rec.subjectCode || "ตรงเวลา"}
                                     </span>
                                   </div>
                                   {teacherLabel && (
-                                    <div className="text-[8px] font-normal text-slate-700 truncate max-w-[72px] mt-0.5">
+                                    <div className="text-[9px] sm:text-[9.5px] font-medium text-slate-700 truncate max-w-[85px] mt-0.5">
                                       {teacherLabel}
                                     </div>
                                   )}
@@ -451,13 +477,13 @@ export default function ClassroomPeriodMatrixModal({
                               >
                                 <div className="flex flex-col items-center justify-center leading-tight">
                                   <div className="flex items-center justify-center gap-0.5 font-bold">
-                                    <span className="text-[8.5px] text-amber-700 font-bold shrink-0">▲</span>
-                                    <span className="text-[8.5px] font-bold tracking-tight truncate max-w-[72px]">
+                                    <span className="text-[10px] text-amber-700 font-bold shrink-0">▲</span>
+                                    <span className="text-[10px] sm:text-[10.5px] font-bold tracking-tight text-slate-900 truncate max-w-[85px]">
                                       {rec.subjectCode || "สาย"}
                                     </span>
                                   </div>
                                   {teacherLabel && (
-                                    <div className="text-[8px] font-normal text-slate-700 truncate max-w-[72px] mt-0.5">
+                                    <div className="text-[9px] sm:text-[9.5px] font-medium text-slate-700 truncate max-w-[85px] mt-0.5">
                                       {teacherLabel}
                                     </div>
                                   )}
@@ -474,13 +500,13 @@ export default function ClassroomPeriodMatrixModal({
                             >
                               <div className="flex flex-col items-center justify-center leading-tight">
                                 <div className="flex items-center justify-center gap-0.5 font-bold">
-                                  <span className="text-[8.5px] text-rose-600 font-bold shrink-0">✕</span>
-                                  <span className="text-[8.5px] font-bold tracking-tight truncate max-w-[72px]">
+                                  <span className="text-[10px] text-rose-600 font-bold shrink-0">✕</span>
+                                  <span className="text-[10px] sm:text-[10.5px] font-bold tracking-tight text-rose-950 truncate max-w-[85px]">
                                     {rec.subjectCode || "ไม่เข้า"}
                                   </span>
                                 </div>
                                 {teacherLabel && (
-                                  <div className="text-[8px] font-normal text-slate-700 truncate max-w-[72px] mt-0.5">
+                                  <div className="text-[9px] sm:text-[9.5px] font-medium text-slate-700 truncate max-w-[85px] mt-0.5">
                                     {teacherLabel}
                                   </div>
                                 )}
@@ -497,7 +523,7 @@ export default function ClassroomPeriodMatrixModal({
                               className="p-1 border border-slate-300 bg-slate-100 text-slate-500 text-center font-medium"
                               title={specialInfo.description}
                             >
-                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold inline-block">
+                              <span className="text-[9.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-700 font-bold inline-block">
                                 [{specialInfo.label}]
                               </span>
                             </td>
@@ -514,12 +540,12 @@ export default function ClassroomPeriodMatrixModal({
                               className="p-1 border border-slate-300 border-dashed bg-white text-slate-700 text-center font-normal"
                               title={`${ttMatch.teacherName} (${ttMatch.subjectCode}) - ยังไม่เช็ค`}
                             >
-                              <div className="flex flex-col items-center justify-center leading-tight opacity-85">
-                                <span className="text-[8.5px] font-bold text-slate-800 tracking-tight truncate max-w-[72px]">
+                              <div className="flex flex-col items-center justify-center leading-tight opacity-90">
+                                <span className="text-[10px] sm:text-[10.5px] font-bold text-slate-800 tracking-tight truncate max-w-[85px]">
                                   {ttMatch.subjectCode}
                                 </span>
                                 {teacherLabel && (
-                                  <span className="text-[8px] text-slate-600 truncate max-w-[72px] mt-0.5">
+                                  <span className="text-[9px] sm:text-[9.5px] text-slate-600 truncate max-w-[85px] mt-0.5">
                                     {teacherLabel}
                                   </span>
                                 )}
@@ -535,7 +561,7 @@ export default function ClassroomPeriodMatrixModal({
                             className="p-1 border border-slate-300 bg-slate-100 text-slate-400 text-center"
                             title="คาบว่าง (ไม่มีในตารางสอน)"
                           >
-                            <span className="text-[8px] text-slate-500">[คาบว่าง]</span>
+                            <span className="text-[9px] text-slate-500 font-normal">[คาบว่าง]</span>
                           </td>
                         );
                       })}
@@ -544,17 +570,17 @@ export default function ClassroomPeriodMatrixModal({
                         const expected = getExpectedPeriodCount(cls.id, cls.gradeRoom);
                         const isComplete = checkedCount >= expected;
                         return (
-                          <td className="p-1 border border-slate-300 font-bold text-center text-[10px] whitespace-nowrap">
+                          <td className="p-1 border border-slate-300 font-bold text-center text-[11px] whitespace-nowrap">
                             <span
                               className={
                                 isComplete
-                                  ? "text-emerald-700"
+                                  ? "text-emerald-700 font-bold"
                                   : checkedCount > 0
-                                  ? "text-amber-700"
-                                  : "text-slate-400"
+                                  ? "text-amber-700 font-bold"
+                                  : "text-slate-400 font-medium"
                               }
                             >
-                              {checkedCount}/{expected} คาบ
+                              {checkedCount}/{expected}
                             </span>
                           </td>
                         );
