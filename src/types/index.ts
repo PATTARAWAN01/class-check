@@ -116,6 +116,7 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   absenceReason?: AbsenceReason;
   absenceNote?: string;
+  lateNote?: string;
   recordedByStudent: string;
   isSubstitute?: boolean;
   originalTeacherId?: string;

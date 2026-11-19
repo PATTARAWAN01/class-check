@@ -71,24 +71,22 @@ export default function ClassroomPeriodMatrixModal({
     if (!element) return;
     try {
       setIsExportingImage(true);
-      // Ensure high resolution canvas (300 DPI+ quality) and full width capture
-      const fullHeight = element.scrollHeight;
-      const fullWidth = Math.max(element.scrollWidth, 1280);
+      // Capture exact natural dimension with pixelRatio 3.5 (prevents right whitespace gap)
+      const captureHeight = element.scrollHeight;
+      const captureWidth = element.scrollWidth;
 
       const dataUrl = await toPng(element, {
         quality: 1.0,
         backgroundColor: "#ffffff",
         pixelRatio: 3.5,
-        height: fullHeight,
-        width: fullWidth,
+        height: captureHeight,
+        width: captureWidth,
         style: {
-          width: `${fullWidth}px`,
-          minWidth: `${fullWidth}px`,
-          height: `${fullHeight}px`,
-          maxHeight: "none",
-          overflow: "visible",
-          margin: "0",
+          width: `${captureWidth}px`,
+          height: `${captureHeight}px`,
+          margin: "0 auto",
           transform: "none",
+          maxWidth: "none",
         },
       });
       const link = document.createElement("a");
@@ -230,11 +228,11 @@ export default function ClassroomPeriodMatrixModal({
             width: 100% !important;
           }
           .matrix-table th {
-            background-color: #e0f2fe !important;
-            color: #082f49 !important;
-            border: 1px solid #94a3b8 !important;
+            background-color: #075985 !important;
+            color: #ffffff !important;
+            border: 1px solid #0369a1 !important;
             padding: 3px 2px !important;
-            font-size: 9pt !important;
+            font-size: 9.5pt !important;
             font-weight: bold !important;
           }
           .matrix-table td {
@@ -403,18 +401,18 @@ export default function ClassroomPeriodMatrixModal({
 
           {/* 27 Classrooms x 7 Periods Matrix Table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-xs border-collapse border border-slate-300 matrix-table">
+            <table className="w-full text-xs border-collapse border border-slate-300 matrix-table table-fixed">
               <thead>
-                <tr className="bg-sky-100 text-sky-950 font-bold text-center text-xs print:bg-sky-100">
-                  <th className="p-1.5 border border-slate-300 w-14 min-w-[52px] text-center">ห้องเรียน</th>
-                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 1</th>
-                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 2</th>
-                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 3</th>
-                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 4</th>
-                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 5</th>
-                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 6</th>
-                  <th className="p-1.5 border border-slate-300 w-[12%] text-center">คาบ 7</th>
-                  <th className="p-1.5 border border-slate-300 w-11 min-w-[42px] text-center">สรุป</th>
+                <tr className="bg-sky-800 text-white font-bold text-center text-xs sm:text-[13px] print:bg-sky-800 print:text-white">
+                  <th className="p-1.5 border border-sky-900 w-[11%] min-w-[50px] text-center">ห้องเรียน</th>
+                  <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 1</th>
+                  <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 2</th>
+                  <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 3</th>
+                  <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 4</th>
+                  <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 5</th>
+                  <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 6</th>
+                  <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 7</th>
+                  <th className="p-1.5 border border-sky-900 w-[8.5%] min-w-[40px] text-center">สรุป</th>
                 </tr>
               </thead>
               <tbody>
@@ -430,7 +428,7 @@ export default function ClassroomPeriodMatrixModal({
                         isNewGrade && idx > 0 ? "border-t-2 border-slate-400" : ""
                       }`}
                     >
-                      <td className="p-1 border border-slate-300 font-bold bg-slate-50 text-slate-900 text-center whitespace-nowrap text-xs">
+                      <td className="p-1 border border-slate-300 font-bold bg-slate-50 text-slate-900 text-center whitespace-nowrap text-xs sm:text-[13px]">
                         {cls.gradeRoom}
                       </td>
 
@@ -453,13 +451,13 @@ export default function ClassroomPeriodMatrixModal({
                               >
                                 <div className="flex flex-col items-center justify-center leading-tight">
                                   <div className="flex items-center justify-center gap-0.5 font-bold">
-                                    <span className="text-[10px] text-emerald-700 font-bold shrink-0">●</span>
-                                    <span className="text-[10px] sm:text-[10.5px] font-bold tracking-tight text-slate-900 truncate max-w-[85px]">
+                                    <span className="text-[11px] text-emerald-700 font-bold shrink-0">●</span>
+                                    <span className="text-[11px] sm:text-[11.5px] font-bold tracking-tight text-slate-900 truncate">
                                       {rec.subjectCode || "ตรงเวลา"}
                                     </span>
                                   </div>
                                   {teacherLabel && (
-                                    <div className="text-[9px] sm:text-[9.5px] font-medium text-slate-700 truncate max-w-[85px] mt-0.5">
+                                    <div className="text-[10px] sm:text-[10.5px] font-semibold text-slate-700 truncate mt-0.5">
                                       {teacherLabel}
                                     </div>
                                   )}
@@ -473,17 +471,17 @@ export default function ClassroomPeriodMatrixModal({
                               <td
                                 key={pNum}
                                 className="p-1 border border-slate-300 bg-amber-50 text-amber-950 font-semibold text-center"
-                                title={`${rec.teacherName} (${rec.subjectCode}) - เข้าสอนสาย`}
+                                title={`${rec.teacherName} (${rec.subjectCode}) - เข้าสอนสาย: ${rec.lateNote || ""}`}
                               >
                                 <div className="flex flex-col items-center justify-center leading-tight">
                                   <div className="flex items-center justify-center gap-0.5 font-bold">
-                                    <span className="text-[10px] text-amber-700 font-bold shrink-0">▲</span>
-                                    <span className="text-[10px] sm:text-[10.5px] font-bold tracking-tight text-slate-900 truncate max-w-[85px]">
+                                    <span className="text-[11px] text-amber-700 font-bold shrink-0">▲</span>
+                                    <span className="text-[11px] sm:text-[11.5px] font-bold tracking-tight text-slate-900 truncate">
                                       {rec.subjectCode || "สาย"}
                                     </span>
                                   </div>
                                   {teacherLabel && (
-                                    <div className="text-[9px] sm:text-[9.5px] font-medium text-slate-700 truncate max-w-[85px] mt-0.5">
+                                    <div className="text-[10px] sm:text-[10.5px] font-semibold text-slate-700 truncate mt-0.5">
                                       {teacherLabel}
                                     </div>
                                   )}
@@ -500,13 +498,13 @@ export default function ClassroomPeriodMatrixModal({
                             >
                               <div className="flex flex-col items-center justify-center leading-tight">
                                 <div className="flex items-center justify-center gap-0.5 font-bold">
-                                  <span className="text-[10px] text-rose-600 font-bold shrink-0">✕</span>
-                                  <span className="text-[10px] sm:text-[10.5px] font-bold tracking-tight text-rose-950 truncate max-w-[85px]">
+                                  <span className="text-[11px] text-rose-600 font-bold shrink-0">✕</span>
+                                  <span className="text-[11px] sm:text-[11.5px] font-bold tracking-tight text-rose-950 truncate">
                                     {rec.subjectCode || "ไม่เข้า"}
                                   </span>
                                 </div>
                                 {teacherLabel && (
-                                  <div className="text-[9px] sm:text-[9.5px] font-medium text-slate-700 truncate max-w-[85px] mt-0.5">
+                                  <div className="text-[10px] sm:text-[10.5px] font-semibold text-slate-700 truncate mt-0.5">
                                     {teacherLabel}
                                   </div>
                                 )}
@@ -523,7 +521,7 @@ export default function ClassroomPeriodMatrixModal({
                               className="p-1 border border-slate-300 bg-slate-100 text-slate-500 text-center font-medium"
                               title={specialInfo.description}
                             >
-                              <span className="text-[9.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-700 font-bold inline-block">
+                              <span className="text-[10px] sm:text-[10.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-700 font-bold inline-block">
                                 [{specialInfo.label}]
                               </span>
                             </td>
@@ -541,11 +539,11 @@ export default function ClassroomPeriodMatrixModal({
                               title={`${ttMatch.teacherName} (${ttMatch.subjectCode}) - ยังไม่เช็ค`}
                             >
                               <div className="flex flex-col items-center justify-center leading-tight opacity-90">
-                                <span className="text-[10px] sm:text-[10.5px] font-bold text-slate-800 tracking-tight truncate max-w-[85px]">
+                                <span className="text-[11px] sm:text-[11.5px] font-bold text-slate-800 tracking-tight truncate">
                                   {ttMatch.subjectCode}
                                 </span>
                                 {teacherLabel && (
-                                  <span className="text-[9px] sm:text-[9.5px] text-slate-600 truncate max-w-[85px] mt-0.5">
+                                  <span className="text-[10px] sm:text-[10.5px] text-slate-600 truncate mt-0.5 font-medium">
                                     {teacherLabel}
                                   </span>
                                 )}
@@ -561,7 +559,7 @@ export default function ClassroomPeriodMatrixModal({
                             className="p-1 border border-slate-300 bg-slate-100 text-slate-400 text-center"
                             title="คาบว่าง (ไม่มีในตารางสอน)"
                           >
-                            <span className="text-[9px] text-slate-500 font-normal">[คาบว่าง]</span>
+                            <span className="text-[10px] text-slate-500 font-normal">[คาบว่าง]</span>
                           </td>
                         );
                       })}
@@ -570,7 +568,7 @@ export default function ClassroomPeriodMatrixModal({
                         const expected = getExpectedPeriodCount(cls.id, cls.gradeRoom);
                         const isComplete = checkedCount >= expected;
                         return (
-                          <td className="p-1 border border-slate-300 font-bold text-center text-[11px] whitespace-nowrap">
+                          <td className="p-1 border border-slate-300 font-bold text-center text-xs sm:text-[12px] whitespace-nowrap">
                             <span
                               className={
                                 isComplete

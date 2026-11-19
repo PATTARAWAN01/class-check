@@ -138,6 +138,7 @@ export default function StudentCheckPage() {
   const [status, setStatus] = useState<AttendanceStatus | "">("");
   const [absenceReason, setAbsenceReason] = useState<AbsenceReason | "">("");
   const [absenceNote, setAbsenceNote] = useState("");
+  const [lateNote, setLateNote] = useState("");
 
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -311,6 +312,7 @@ export default function StudentCheckPage() {
     setStatus(record.status);
     setAbsenceReason(record.absenceReason || "");
     setAbsenceNote(record.absenceNote || "");
+    setLateNote(record.lateNote || "");
 
     // Scroll smoothly to form
     const formEl = document.getElementById("checkin-form");
@@ -325,6 +327,7 @@ export default function StudentCheckPage() {
     setStatus("");
     setAbsenceReason("");
     setAbsenceNote("");
+    setLateNote("");
   };
 
   // Delete a record (allowed within 7 days)
@@ -899,6 +902,10 @@ export default function StudentCheckPage() {
       alert("กรณีครูไม่เข้าสอน กรุณาพิมพ์ระบุเหตุผลในช่องข้อความ");
       return;
     }
+    if (status === "late" && !lateNote.trim()) {
+      alert("กรณีครูเข้าสอนสาย กรุณาพิมพ์ระบุสาเหตุในช่องข้อความ");
+      return;
+    }
 
     setSubmitting(true);
 
@@ -994,6 +1001,13 @@ export default function StudentCheckPage() {
             newValue: absenceNote.trim(),
           });
         }
+        if (status === "late" && editingRecord.lateNote !== lateNote.trim()) {
+          changes.push({
+            field: "สาเหตุการเข้าสอนสาย",
+            oldValue: editingRecord.lateNote || "-",
+            newValue: lateNote.trim(),
+          });
+        }
 
         const newEditLog = {
           timestamp: new Date().toISOString(),
@@ -1018,6 +1032,7 @@ export default function StudentCheckPage() {
           status,
           absenceReason: status === "absent" ? (absenceReason as AbsenceReason) : undefined,
           absenceNote: status === "absent" ? absenceNote.trim() : "",
+          lateNote: status === "late" ? lateNote.trim() : "",
           isSubstitute: isSub,
           originalTeacherId: isSub ? currentSubstitute?.originalTeacherId : undefined,
           originalTeacherName: isSub ? currentSubstitute?.originalTeacherName : undefined,
@@ -1048,6 +1063,7 @@ export default function StudentCheckPage() {
           status,
           absenceReason: status === "absent" ? (absenceReason as AbsenceReason) : undefined,
           absenceNote: status === "absent" ? absenceNote.trim() : "",
+          lateNote: status === "late" ? lateNote.trim() : "",
           recordedByStudent: studentName.trim(),
           isSubstitute: isSub,
           originalTeacherId: isSub ? currentSubstitute?.originalTeacherId : undefined,
@@ -1066,6 +1082,7 @@ export default function StudentCheckPage() {
       setStatus("");
       setAbsenceReason("");
       setAbsenceNote("");
+      setLateNote("");
 
       setTimeout(() => {
         setSubmitSuccess(false);
@@ -1945,6 +1962,7 @@ export default function StudentCheckPage() {
                       setStatus("on_time");
                       setAbsenceReason("");
                       setAbsenceNote("");
+                      setLateNote("");
                     }}
                     className="sr-only"
                   />
@@ -2005,7 +2023,10 @@ export default function StudentCheckPage() {
                     name="attendance_status"
                     value="absent"
                     checked={status === "absent"}
-                    onChange={() => setStatus("absent")}
+                    onChange={() => {
+                      setStatus("absent");
+                      setLateNote("");
+                    }}
                     className="sr-only"
                   />
                   <span className="font-bold text-base">
@@ -2018,6 +2039,30 @@ export default function StudentCheckPage() {
                   />
                 </label>
               </div>
+
+              {/* Sub-form: Mandatory Typed Late Reason */}
+              {status === "late" && (
+                <div className="mt-4 p-4 rounded-xl bg-amber-50/70 border-2 border-amber-300 space-y-2 animate-in fade-in duration-200">
+                  <label className="block text-xs font-bold text-amber-950 uppercase tracking-wider flex items-center justify-between">
+                    <span>ระบุสาเหตุที่ครูเข้าสอนสาย (&gt;10 นาที) <span className="text-amber-700">* (จำเป็นต้องระบุ)</span></span>
+                  </label>
+                  <input
+                    type="text"
+                    value={lateNote}
+                    onChange={(e) => setLateNote(e.target.value)}
+                    placeholder="พิมพ์ระบุสาเหตุ เช่น ติดภารกิจช่วงต้นคาบ, ประชุมสั้น, ติดเคลียร์งานคาบก่อนหน้า..."
+                    className={`w-full px-4 py-3 rounded-xl border text-sm text-slate-800 transition-all ${
+                      lateNote.trim()
+                        ? "border-2 border-amber-600 bg-white font-semibold shadow-xs"
+                        : "border-amber-300 bg-white focus:ring-2 focus:ring-amber-500"
+                    }`}
+                    required
+                  />
+                  <p className="text-[11px] text-amber-800">
+                    * กรุณาพิมพ์ระบุสาเหตุหรือภารกิจที่ทำให้ครูเข้าสอนสายในคาบนี้ให้ชัดเจน
+                  </p>
+                </div>
+              )}
 
               {/* Sub-form: Mandatory Typed Absence Reason */}
               {status === "absent" && (
@@ -2188,9 +2233,12 @@ export default function StudentCheckPage() {
                             </span>
                           )}
                           {log.status === "late" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                            <span
+                              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800"
+                              title={log.lateNote ? `สาเหตุ: ${log.lateNote}` : undefined}
+                            >
                               <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-                              สาย &gt;10 นาที
+                              สาย {log.lateNote ? `(${log.lateNote})` : ">10 นาที"}
                             </span>
                           )}
                           {log.status === "absent" && (

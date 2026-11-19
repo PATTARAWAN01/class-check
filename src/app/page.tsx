@@ -18,8 +18,11 @@ import {
   Building2,
   X,
   Sparkles,
+  LayoutGrid,
+  Maximize2,
 } from "lucide-react";
 import {
+  getClassrooms,
   getTerms,
   getTeachers,
   getSchoolProfile,
@@ -28,10 +31,11 @@ import {
   getTimetable,
 } from "@/lib/storage";
 import { exportAttendanceToExcel } from "@/lib/excel";
-import { AcademicTerm, Teacher, AttendanceRecord, SchoolProfile, SubstituteAssignment, SubstituteLeaveType, TimetableEntry } from "@/types";
+import { AcademicTerm, Classroom, Teacher, AttendanceRecord, SchoolProfile, SubstituteAssignment, SubstituteLeaveType, TimetableEntry } from "@/types";
 import { DEPARTMENTS } from "@/lib/constants";
 import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
-import { getEffectivePeriodCount, deduplicateAttendanceRecords } from "@/lib/attendanceUtils";
+import { getEffectivePeriodCount, deduplicateAttendanceRecords, getSpecialNonCheckedPeriodInfo } from "@/lib/attendanceUtils";
+import ClassroomPeriodMatrixModal from "@/components/ClassroomPeriodMatrixModal";
 
 type TimeFilter = "today" | "week" | "month" | "term" | "custom";
 
@@ -39,10 +43,16 @@ export default function StatisticsPage() {
   const [terms, setTerms] = useState<AcademicTerm[]>([]);
   const [selectedTermId, setSelectedTermId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [allAttendance, setAllAttendance] = useState<AttendanceRecord[]>([]);
   const [substitutes, setSubstitutes] = useState<SubstituteAssignment[]>([]);
   const [schoolProfile, setSchoolProfile] = useState<SchoolProfile | null>(null);
+
+  // Embedded Matrix State (above teacher search)
+  const [matrixDate, setMatrixDate] = useState(() => getThaiDateString());
+  const [matrixGrade, setMatrixGrade] = useState<string>("all");
+  const [showMatrixModal, setShowMatrixModal] = useState(false);
 
   // View Mode: Regular Teaching Attendance vs Substitute Teaching Stats
   const [statViewMode, setStatViewMode] = useState<"attendance" | "substitute">("attendance");
@@ -71,18 +81,20 @@ export default function StatisticsPage() {
   // Load Initial Data
   useEffect(() => {
     async function init() {
-      const [termList, tchList, prof, subList, ttList] = await Promise.all([
+      const [termList, tchList, prof, subList, ttList, clsList] = await Promise.all([
         getTerms(),
         getTeachers(),
         getSchoolProfile(),
         getSubstituteAssignments(),
         getTimetable(),
+        getClassrooms(),
       ]);
       setTerms(termList);
       setTeachers(tchList);
       setSchoolProfile(prof);
       setSubstitutes(subList);
       setTimetable(ttList);
+      setClassrooms(clsList);
 
       const active = termList.find((t) => t.isActive) || termList[0];
       if (active) setSelectedTermId(active.id);
@@ -305,6 +317,95 @@ export default function StatisticsPage() {
     );
   };
 
+  function getTeacherFirstName(fullName: string = ""): string {
+    if (!fullName) return "";
+    const clean = fullName
+      .replace(/^(นาย|นางสาว|นาง|ว่าที่ร้อยตรี|ดร\.|อ\.|ครู)\s*/g, "")
+      .trim();
+    const parts = clean.split(/\s+/);
+    return parts[0] || clean;
+  }
+
+  const matrixDayOfWeek = useMemo(() => {
+    const parts = matrixDate.split("-").map(Number);
+    if (parts.length < 3 || isNaN(parts[0])) return 1;
+    return new Date(parts[0], parts[1] - 1, parts[2]).getDay();
+  }, [matrixDate]);
+
+  const matrixDayRecords = useMemo(() => {
+    return allAttendance.filter((r) => r.date === matrixDate);
+  }, [allAttendance, matrixDate]);
+
+  const matrixSortedClassrooms = useMemo(() => {
+    const list =
+      matrixGrade === "all"
+        ? classrooms
+        : classrooms.filter((c) => c.grade === matrixGrade);
+
+    return [...list].sort((a, b) =>
+      a.gradeRoom.localeCompare(b.gradeRoom, "th", { numeric: true })
+    );
+  }, [classrooms, matrixGrade]);
+
+  const matrixMap = useMemo(() => {
+    const map = new Map<string, Map<number, AttendanceRecord>>();
+    matrixDayRecords.forEach((r) => {
+      if (!map.has(r.classroomId)) {
+        map.set(r.classroomId, new Map());
+      }
+      const roomMap = map.get(r.classroomId)!;
+      for (let p = r.periodStart; p <= r.periodEnd; p++) {
+        roomMap.set(p, r);
+      }
+    });
+    return map;
+  }, [matrixDayRecords]);
+
+  const getTimetableEntryForMatrix = (
+    clsId: string,
+    gradeRoom: string,
+    pNum: number,
+    dOfWeek: number
+  ): TimetableEntry | undefined => {
+    if (!timetable || timetable.length === 0) return undefined;
+    return timetable.find(
+      (tt) =>
+        (tt.classroomId === clsId || tt.gradeRoom === gradeRoom) &&
+        tt.dayOfWeek === dOfWeek &&
+        pNum >= tt.periodStart &&
+        pNum <= tt.periodEnd
+    );
+  };
+
+  const getExpectedPeriodCountForMatrix = (clsId: string, gradeRoom: string): number => {
+    let count = 0;
+    for (let p = 1; p <= 7; p++) {
+      const tt = getTimetableEntryForMatrix(clsId, gradeRoom, p, matrixDayOfWeek);
+      const special = getSpecialNonCheckedPeriodInfo(clsId, gradeRoom, matrixDayOfWeek, p, tt);
+      if (!special) count++;
+    }
+    return count > 0 ? count : 7;
+  };
+
+  const matrixStats = useMemo(() => {
+    let fullyChecked = 0;
+    let partiallyChecked = 0;
+    let notChecked = 0;
+    let totalCheckedPeriods = 0;
+
+    matrixSortedClassrooms.forEach((c) => {
+      const roomMap = matrixMap.get(c.id);
+      const count = roomMap ? roomMap.size : 0;
+      const expected = getExpectedPeriodCountForMatrix(c.id, c.gradeRoom);
+      totalCheckedPeriods += count;
+      if (count >= expected) fullyChecked++;
+      else if (count > 0) partiallyChecked++;
+      else notChecked++;
+    });
+
+    return { fullyChecked, partiallyChecked, notChecked, totalCheckedPeriods };
+  }, [matrixSortedClassrooms, matrixMap, matrixDayOfWeek, timetable]);
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -516,6 +617,308 @@ export default function StatisticsPage() {
             <span>&bull;</span>
             <span>อื่นๆ: {kpis.absentOther}</span>
           </div>
+        </div>
+      </div>
+
+      {/* ========================================================== */}
+      {/* 27 CLASSROOMS x 7 PERIODS MATRIX SECTION */}
+      {/* ========================================================== */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-4 sm:p-5 space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center">
+              <LayoutGrid className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-800 text-sm sm:text-base leading-tight">
+                ตารางสรุปการปฏิบัติการสอนของครูผู้สอนรายห้องและรายคาบ
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                สถานะการเข้าสอนประจำวัน 27 ห้องเรียน &bull; ประจำ{formatThaiDateLong(matrixDate)}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Date Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-200 text-xs">
+              <span className="text-slate-500 text-[11px]">วันที่:</span>
+              <input
+                type="date"
+                value={matrixDate}
+                onChange={(e) => setMatrixDate(e.target.value)}
+                className="bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => setMatrixDate(getThaiDateString())}
+                className="px-1.5 py-0.5 rounded-md bg-sky-100 hover:bg-sky-200 text-sky-800 text-[10px] font-medium transition-colors"
+                title="เลือกวันนี้"
+              >
+                วันนี้
+              </button>
+              <button
+                type="button"
+                onClick={() => setMatrixDate(getThaiOffsetDate(1))}
+                className="px-1.5 py-0.5 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-medium transition-colors"
+                title="เลือกเมื่อวาน"
+              >
+                เมื่อวาน
+              </button>
+            </div>
+
+            {/* Grade Filter */}
+            <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-200 text-xs">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={matrixGrade}
+                onChange={(e) => setMatrixGrade(e.target.value)}
+                className="bg-transparent text-slate-800 font-medium focus:outline-none cursor-pointer"
+              >
+                <option value="all">ทุกระดับชั้น (27 ห้อง)</option>
+                {["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"].map((g) => (
+                  <option key={g} value={g}>เฉพาะระดับ {g}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Expand / Print Modal Button */}
+            <button
+              type="button"
+              onClick={() => setShowMatrixModal(true)}
+              className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all"
+              title="เปิดดูตารางขนาดเต็มหน้าจอ บันทึกเป็นรูปภาพ หรือพิมพ์ A4"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>ขยายเต็มจอ / พิมพ์ตาราง</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Stats Pills */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+          <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-200">
+            <div className="text-[10px] text-emerald-800">เช็คครบทุกคาบ</div>
+            <div className="text-base font-bold text-emerald-900">{matrixStats.fullyChecked} ห้อง</div>
+          </div>
+          <div className="p-2 bg-amber-50 rounded-xl border border-amber-200">
+            <div className="text-[10px] text-amber-800">เช็คบางส่วน</div>
+            <div className="text-base font-bold text-amber-900">{matrixStats.partiallyChecked} ห้อง</div>
+          </div>
+          <div className="p-2 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="text-[10px] text-slate-600">ยังไม่เช็คเลย</div>
+            <div className="text-base font-bold text-slate-800">{matrixStats.notChecked} ห้อง</div>
+          </div>
+          <div className="p-2 bg-sky-50 rounded-xl border border-sky-200">
+            <div className="text-[10px] text-sky-800">คาบที่บันทึกแล้ว</div>
+            <div className="text-base font-bold text-sky-900">{matrixStats.totalCheckedPeriods} คาบ</div>
+          </div>
+        </div>
+
+        {/* Responsive Table Container */}
+        <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
+          <table className="w-full text-xs border-collapse border border-slate-300 table-fixed min-w-[760px]">
+            <thead>
+              <tr className="bg-sky-800 text-white font-bold text-center text-xs sm:text-[13px]">
+                <th className="p-1.5 border border-sky-900 w-[11%] min-w-[50px] text-center">ห้องเรียน</th>
+                <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 1</th>
+                <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 2</th>
+                <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 3</th>
+                <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 4</th>
+                <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 5</th>
+                <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 6</th>
+                <th className="p-1.5 border border-sky-900 w-[11.5%] text-center">คาบ 7</th>
+                <th className="p-1.5 border border-sky-900 w-[8.5%] min-w-[40px] text-center">สรุป</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrixSortedClassrooms.map((cls, idx) => {
+                const roomMap = matrixMap.get(cls.id);
+                const checkedCount = roomMap ? roomMap.size : 0;
+                const isNewGrade = idx === 0 || matrixSortedClassrooms[idx - 1].grade !== cls.grade;
+
+                return (
+                  <tr
+                    key={cls.id}
+                    className={`text-center hover:bg-slate-50 transition-colors ${
+                      isNewGrade && idx > 0 ? "border-t-2 border-slate-400" : ""
+                    }`}
+                  >
+                    <td className="p-1 border border-slate-300 font-bold bg-slate-50 text-slate-900 text-center whitespace-nowrap text-xs sm:text-[13px]">
+                      {cls.gradeRoom}
+                    </td>
+
+                    {[1, 2, 3, 4, 5, 6, 7].map((pNum) => {
+                      const rec = roomMap ? roomMap.get(pNum) : undefined;
+                      const ttMatch = getTimetableEntryForMatrix(cls.id, cls.gradeRoom, pNum, matrixDayOfWeek);
+                      const specialInfo = getSpecialNonCheckedPeriodInfo(cls.id, cls.gradeRoom, matrixDayOfWeek, pNum, ttMatch);
+
+                      // Case 1: Checked records (On Time, Late, Absent)
+                      if (rec) {
+                        const teacherName = getTeacherFirstName(rec.teacherName);
+                        const teacherLabel = teacherName ? `ครู${teacherName}` : "";
+
+                        if (rec.status === "on_time") {
+                          return (
+                            <td
+                              key={pNum}
+                              className="p-1 border border-slate-300 bg-emerald-50 text-emerald-950 font-semibold text-center"
+                              title={`${rec.teacherName} (${rec.subjectCode}) - ตรงเวลา`}
+                            >
+                              <div className="flex flex-col items-center justify-center leading-tight">
+                                <div className="flex items-center justify-center gap-0.5 font-bold">
+                                  <span className="text-[11px] text-emerald-700 font-bold shrink-0">●</span>
+                                  <span className="text-[11px] sm:text-[11.5px] font-bold tracking-tight text-slate-900 truncate">
+                                    {rec.subjectCode || "ตรงเวลา"}
+                                  </span>
+                                </div>
+                                {teacherLabel && (
+                                  <div className="text-[10px] sm:text-[10.5px] font-semibold text-slate-700 truncate mt-0.5">
+                                    {teacherLabel}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        if (rec.status === "late") {
+                          return (
+                            <td
+                              key={pNum}
+                              className="p-1 border border-slate-300 bg-amber-50 text-amber-950 font-semibold text-center"
+                              title={`${rec.teacherName} (${rec.subjectCode}) - เข้าสอนสาย: ${rec.lateNote || ""}`}
+                            >
+                              <div className="flex flex-col items-center justify-center leading-tight">
+                                <div className="flex items-center justify-center gap-0.5 font-bold">
+                                  <span className="text-[11px] text-amber-700 font-bold shrink-0">▲</span>
+                                  <span className="text-[11px] sm:text-[11.5px] font-bold tracking-tight text-slate-900 truncate">
+                                    {rec.subjectCode || "สาย"}
+                                  </span>
+                                </div>
+                                {teacherLabel && (
+                                  <div className="text-[10px] sm:text-[10.5px] font-semibold text-slate-700 truncate mt-0.5">
+                                    {teacherLabel}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        return (
+                          <td
+                            key={pNum}
+                            className="p-1 border border-slate-300 bg-rose-50 text-rose-950 font-bold text-center"
+                            title={`${rec.teacherName} (${rec.subjectCode}) - ไม่เข้าสอน: ${rec.absenceNote || rec.absenceReason || ""}`}
+                          >
+                            <div className="flex flex-col items-center justify-center leading-tight">
+                              <div className="flex items-center justify-center gap-0.5 font-bold">
+                                <span className="text-[11px] text-rose-600 font-bold shrink-0">✕</span>
+                                <span className="text-[11px] sm:text-[11.5px] font-bold tracking-tight text-rose-950 truncate">
+                                  {rec.subjectCode || "ไม่เข้า"}
+                                </span>
+                              </div>
+                              {teacherLabel && (
+                                <div className="text-[10px] sm:text-[10.5px] font-semibold text-slate-700 truncate mt-0.5">
+                                  {teacherLabel}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      }
+
+                      // Case 2: Special Activity or Free Period
+                      if (specialInfo) {
+                        return (
+                          <td
+                            key={pNum}
+                            className="p-1 border border-slate-300 bg-slate-100 text-slate-500 text-center font-medium"
+                            title={specialInfo.description}
+                          >
+                            <span className="text-[10px] sm:text-[10.5px] px-1 py-0.5 rounded bg-slate-200/90 text-slate-700 font-bold inline-block">
+                              [{specialInfo.label}]
+                            </span>
+                          </td>
+                        );
+                      }
+
+                      // Case 3: Unchecked scheduled timetable slot
+                      if (ttMatch && (ttMatch.subjectCode || ttMatch.teacherName)) {
+                        const teacherName = getTeacherFirstName(ttMatch.teacherName);
+                        const teacherLabel = teacherName ? `ครู${teacherName}` : "";
+                        return (
+                          <td
+                            key={pNum}
+                            className="p-1 border border-slate-300 border-dashed bg-white text-slate-700 text-center font-normal"
+                            title={`${ttMatch.teacherName} (${ttMatch.subjectCode}) - ยังไม่เช็ค`}
+                          >
+                            <div className="flex flex-col items-center justify-center leading-tight opacity-90">
+                              <span className="text-[11px] sm:text-[11.5px] font-bold text-slate-800 tracking-tight truncate">
+                                {ttMatch.subjectCode}
+                              </span>
+                              {teacherLabel && (
+                                <span className="text-[10px] sm:text-[10.5px] text-slate-600 truncate mt-0.5 font-medium">
+                                  {teacherLabel}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      }
+
+                      // Case 4: Free period fallback
+                      return (
+                        <td
+                          key={pNum}
+                          className="p-1 border border-slate-300 bg-slate-100 text-slate-400 text-center"
+                          title="คาบว่าง (ไม่มีในตารางสอน)"
+                        >
+                          <span className="text-[10px] text-slate-500 font-normal">[คาบว่าง]</span>
+                        </td>
+                      );
+                    })}
+
+                    {(() => {
+                      const expected = getExpectedPeriodCountForMatrix(cls.id, cls.gradeRoom);
+                      const isComplete = checkedCount >= expected;
+                      return (
+                        <td className="p-1 border border-slate-300 font-bold text-center text-xs sm:text-[12px] whitespace-nowrap">
+                          <span
+                            className={
+                              isComplete
+                                ? "text-emerald-700 font-bold"
+                                : checkedCount > 0
+                                ? "text-amber-700 font-bold"
+                                : "text-slate-400 font-medium"
+                            }
+                          >
+                            {checkedCount}/{expected}
+                          </span>
+                        </td>
+                      );
+                    })()}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Legend */}
+        <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100 gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>สัญลักษณ์:</span>
+            <span className="text-emerald-700 font-bold">● ตรงเวลา</span>
+            <span className="text-amber-700 font-bold">▲ สาย</span>
+            <span className="text-rose-700 font-bold">✕ ไม่เข้าสอน</span>
+            <span className="border border-dashed border-slate-400 px-1 rounded text-slate-600 bg-white">รหัสวิชา ครู [รอเช็ค]</span>
+            <span className="text-slate-600 font-medium bg-slate-100 px-1 rounded border border-slate-200">[กิจกรรม/คาบว่าง]</span>
+          </div>
+          <span className="text-[10.5px] text-slate-400">
+            * คลิก "ขยายเต็มจอ / พิมพ์ตาราง" เพื่อดูภาพใหญ่ บันทึกเป็น PNG หรือสั่งพิมพ์ 1 หน้า A4
+          </span>
         </div>
       </div>
 
@@ -1164,6 +1567,18 @@ export default function StatisticsPage() {
             </div>
           </div>
         </div>
+      )}
+      {/* Classroom Period Matrix Modal for Full Screen / Printing */}
+      {showMatrixModal && schoolProfile && (
+        <ClassroomPeriodMatrixModal
+          isOpen={showMatrixModal}
+          onClose={() => setShowMatrixModal(false)}
+          classrooms={classrooms}
+          records={allAttendance}
+          schoolProfile={schoolProfile}
+          initialDate={matrixDate}
+          timetable={timetable}
+        />
       )}
     </div>
   );

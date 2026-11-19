@@ -62,8 +62,16 @@ export default function OfficialPdfReport({
   let absentActivity = 0;
   let absentOther = 0;
 
-  // List of all absence notes for summary
-  const allOtherNotes: {
+  // List of all late and absence notes for summary
+  const allLateNotes: {
+    teacherName: string;
+    gradeRoom: string;
+    subject: string;
+    date: string;
+    note: string;
+  }[] = [];
+
+  const allAbsentNotes: {
     teacherName: string;
     gradeRoom: string;
     subject: string;
@@ -75,7 +83,18 @@ export default function OfficialPdfReport({
     const count = getEffectivePeriodCount(r, timetable);
     totalPeriods += count;
     if (r.status === "on_time") onTimePeriods += count;
-    else if (r.status === "late") latePeriods += count;
+    else if (r.status === "late") {
+      latePeriods += count;
+      if (r.lateNote && r.lateNote.trim()) {
+        allLateNotes.push({
+          teacherName: r.teacherName,
+          gradeRoom: r.gradeRoom,
+          subject: r.subjectName || r.subjectCode,
+          date: r.date,
+          note: r.lateNote.trim(),
+        });
+      }
+    }
     else if (r.status === "absent") {
       absentPeriods += count;
       if (r.absenceReason === "meeting") absentMeeting += count;
@@ -91,7 +110,7 @@ export default function OfficialPdfReport({
         "ไม่ระบุเหตุผล"
       );
 
-      allOtherNotes.push({
+      allAbsentNotes.push({
         teacherName: r.teacherName,
         gradeRoom: r.gradeRoom,
         subject: r.subjectName || r.subjectCode,
@@ -127,13 +146,21 @@ export default function OfficialPdfReport({
         let tMeeting = 0;
         let tActivity = 0;
         let tOther = 0;
+        const tLateNotes: string[] = [];
         const tAbsentNotes: string[] = [];
 
         tRecords.forEach((r) => {
           const count = getEffectivePeriodCount(r, timetable);
           tTotal += count;
           if (r.status === "on_time") tOnTime += count;
-          else if (r.status === "late") tLate += count;
+          else if (r.status === "late") {
+            tLate += count;
+            if (r.lateNote && r.lateNote.trim()) {
+              tLateNotes.push(
+                r.gradeRoom ? `${r.lateNote.trim()} (${r.gradeRoom})` : r.lateNote.trim()
+              );
+            }
+          }
           else if (r.status === "absent") {
             tAbsent += count;
             if (r.absenceReason === "meeting") tMeeting += count;
@@ -170,6 +197,7 @@ export default function OfficialPdfReport({
           meeting: tMeeting,
           activity: tActivity,
           other: tOther,
+          lateNotes: Array.from(new Set(tLateNotes)),
           absentNotes: Array.from(new Set(tAbsentNotes)),
           rate,
         };
@@ -208,9 +236,9 @@ export default function OfficialPdfReport({
       setIsExportingImage(true);
       if (modal) modal.scrollLeft = 0;
 
-      // Ultra-HD capture: 300 DPI+ quality with min width 1280px
+      // Exact dimension capture with pixelRatio 3.5 (prevents right whitespace gap)
       const fullHeight = element.scrollHeight;
-      const fullWidth = Math.max(element.scrollWidth, 1280);
+      const fullWidth = element.scrollWidth;
 
       const dataUrl = await toPng(element, {
         quality: 1.0,
@@ -220,12 +248,10 @@ export default function OfficialPdfReport({
         width: fullWidth,
         style: {
           width: `${fullWidth}px`,
-          minWidth: `${fullWidth}px`,
           height: `${fullHeight}px`,
-          maxHeight: "none",
-          overflow: "visible",
-          margin: "0",
+          margin: "0 auto",
           transform: "none",
+          maxWidth: "none",
         },
       });
       const link = document.createElement("a");
@@ -383,11 +409,11 @@ export default function OfficialPdfReport({
       </div>
 
       {/* Centering and Mobile Horizontal Panning Wrapper */}
-      <div className="min-w-fit w-full flex justify-start sm:justify-center pb-8 sm:pb-6 pt-1">
+      <div className="w-full flex justify-center items-center pb-8 sm:pb-6 pt-1">
         {/* Official A4 Document Container */}
         <div
           id="official-report-sheet"
-          className="report-document-sheet bg-white text-slate-900 shrink-0 w-[210mm] min-w-[210mm] min-h-[297mm] p-6 sm:p-10 rounded-2xl shadow-2xl mx-auto print:m-0 print:p-0 print:shadow-none print:w-full print:max-w-none print:min-w-0 print:min-h-0 print:rounded-none font-['TH_Sarabun_New','Sarabun',sans-serif] leading-relaxed print:text-black"
+          className="report-document-sheet bg-white text-slate-900 shrink-0 w-[210mm] max-w-[210mm] min-h-[297mm] p-6 sm:p-10 rounded-2xl shadow-2xl mx-auto print:m-0 print:p-0 print:shadow-none print:w-full print:max-w-none print:min-w-0 print:min-h-0 print:rounded-none font-['TH_Sarabun_New','Sarabun',sans-serif] leading-relaxed print:text-black"
         >
           {/* Document Header (Standardized Format) */}
           <div className="text-center border-b-2 border-slate-900 pb-3 mb-3 print:pb-1 print:mb-1">
@@ -507,7 +533,9 @@ export default function OfficialPdfReport({
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-9 print:w-7 text-center whitespace-nowrap text-emerald-800">ตรงเวลา</th>
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-8 print:w-6 text-center whitespace-nowrap text-amber-800">สาย</th>
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-10 print:w-8 text-center whitespace-nowrap text-rose-800 font-bold">ไม่เข้าสอน</th>
-                    <th className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-left whitespace-nowrap text-slate-700">เหตุผลการไม่เข้าสอน</th>
+                    <th className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-left whitespace-nowrap text-slate-700">
+                      เหตุผลการเข้าสอนสาย/ไม่เข้าสอน
+                    </th>
                     <th className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 w-11 print:w-9 text-center whitespace-nowrap font-bold text-slate-900">ร้อยละเข้า</th>
                   </tr>
                 </thead>
@@ -534,10 +562,19 @@ export default function OfficialPdfReport({
                         {ts.absent > 0 ? ts.absent : "-"}
                       </td>
                       <td className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-slate-700">
-                        {ts.absentNotes.length > 0 ? (
-                          <span className="text-[9px] print:text-[5.8pt] text-rose-950 font-medium">
-                            {ts.absentNotes.join(", ")}
-                          </span>
+                        {ts.lateNotes.length > 0 || ts.absentNotes.length > 0 ? (
+                          <div className="flex flex-col gap-0.5">
+                            {ts.lateNotes.map((note, nIdx) => (
+                              <span key={`l_${nIdx}`} className="text-[9px] print:text-[5.8pt] text-amber-700 font-semibold leading-tight">
+                                ● สาย: {note}
+                              </span>
+                            ))}
+                            {ts.absentNotes.map((note, nIdx) => (
+                              <span key={`a_${nIdx}`} className="text-[9px] print:text-[5.8pt] text-rose-700 font-bold leading-tight">
+                                ✕ ไม่เข้า: {note}
+                              </span>
+                            ))}
+                          </div>
                         ) : (
                           <div className="text-center text-slate-400">-</div>
                         )}
@@ -558,30 +595,55 @@ export default function OfficialPdfReport({
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-amber-800">{latePeriods}</td>
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-rose-800 font-bold">{absentPeriods}</td>
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-1 text-left text-slate-700">
-                      {allOtherNotes.length > 0 ? `รวมระบุเหตุผล ${allOtherNotes.length} รายการ` : "-"}
+                      {allLateNotes.length > 0 || allAbsentNotes.length > 0
+                        ? `ระบุเหตุผล ${allLateNotes.length + allAbsentNotes.length} รายการ (สาย ${allLateNotes.length}, ไม่เข้า ${allAbsentNotes.length})`
+                        : "-"}
                     </td>
                     <td className="border border-slate-300 p-1 print:py-[1px] print:px-0.5 text-sky-900">{overallRate}%</td>
                   </tr>
                 </tbody>
               </table>
 
-              {/* Absence Reasons Notes Summary Box (if students specified any notes) */}
-              {allOtherNotes.length > 0 && (
+              {/* Late & Absence Reasons Notes Summary Box */}
+              {(allLateNotes.length > 0 || allAbsentNotes.length > 0) && (
                 <div className="mt-2.5 print:mt-1 p-2 print:p-1 bg-slate-50 border border-slate-300 rounded-lg text-xs print:text-[5.8pt] print:leading-tight break-inside-avoid">
-                  <div className="font-bold text-slate-900 mb-0.5 flex items-center gap-1">
-                    <span>📌 สรุปเหตุผลการไม่เข้าสอนที่ระบุทั้งหมด ({allOtherNotes.length} รายการ):</span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-slate-700">
-                    {allOtherNotes.map((item, i) => (
-                      <div key={i} className="flex items-start gap-1">
-                        <span className="text-slate-400">&bull;</span>
-                        <span className="truncate">
-                          <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}):{" "}
-                          <span className="font-medium text-rose-900 bg-rose-50 px-0.5 rounded">{item.note}</span>
-                        </span>
+                  {allLateNotes.length > 0 && (
+                    <div className="mb-2 print:mb-1">
+                      <div className="font-bold text-amber-900 mb-0.5 flex items-center gap-1">
+                        <span>⚠️ สรุปสาเหตุการเข้าสอนสาย ({allLateNotes.length} รายการ):</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-slate-700">
+                        {allLateNotes.map((item, i) => (
+                          <div key={i} className="flex items-start gap-1">
+                            <span className="text-amber-500 font-bold">&bull;</span>
+                            <span className="truncate">
+                              <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}):{" "}
+                              <span className="font-semibold text-amber-800 bg-amber-50 px-1 rounded">{item.note}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {allAbsentNotes.length > 0 && (
+                    <div>
+                      <div className="font-bold text-rose-900 mb-0.5 flex items-center gap-1">
+                        <span>📌 สรุปเหตุผลการไม่เข้าสอน ({allAbsentNotes.length} รายการ):</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-slate-700">
+                        {allAbsentNotes.map((item, i) => (
+                          <div key={i} className="flex items-start gap-1">
+                            <span className="text-rose-500 font-bold">&bull;</span>
+                            <span className="truncate">
+                              <strong>{item.teacherName}</strong> ({item.gradeRoom} {item.subject}):{" "}
+                              <span className="font-bold text-rose-800 bg-rose-50 px-1 rounded">{item.note}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
