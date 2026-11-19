@@ -74,6 +74,7 @@ import {
   getSubstituteAssignments,
   saveSubstituteAssignment,
   deleteSubstituteAssignment,
+  getSubstituteSyncStatus,
 } from "@/lib/storage";
 import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
 import {
@@ -240,6 +241,7 @@ export default function AdminPage() {
       prof,
       attList,
       subList,
+      syncStatus,
     ] = await Promise.all([
       getTerms(),
       getTeachers(),
@@ -250,6 +252,7 @@ export default function AdminPage() {
       getSchoolProfile(),
       getAttendanceLogs(),
       getSubstituteAssignments(),
+      getSubstituteSyncStatus(),
     ]);
 
     setTerms(termList);
@@ -261,6 +264,18 @@ export default function AdminPage() {
     setSchoolProfile(prof);
     setAttendanceLogs(attList);
     setSubstitutes(subList);
+
+    if (syncStatus) {
+      setLastSyncResult({
+        success: syncStatus.status === "success",
+        message: syncStatus.message || "ซิงก์ข้อมูลอัตโนมัติล่าสุดสำเร็จ",
+        totalSynced: syncStatus.totalCount || 0,
+        assignedCount: syncStatus.assignedCount || 0,
+        unassignedCount: syncStatus.unassignedCount || 0,
+        syncedAt: syncStatus.lastSyncedAt,
+        date: syncStatus.lastSyncedDate,
+      });
+    }
 
     const active = termList.find((t) => t.isActive) || termList[0];
     if (active) setPdfTermId(active.id);
@@ -2299,7 +2314,7 @@ export default function AdminPage() {
             {/* Sync Feedback Box */}
             {lastSyncResult && (
               <div className="mt-4 pt-4 border-t border-indigo-700/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {lastSyncResult.success ? (
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   ) : (
@@ -2308,6 +2323,11 @@ export default function AdminPage() {
                   <span className={lastSyncResult.success ? "text-emerald-200 font-medium" : "text-rose-200 font-medium"}>
                     {lastSyncResult.message}
                   </span>
+                  {lastSyncResult.syncedAt && (
+                    <span className="text-[11px] text-indigo-300/80 bg-white/10 px-2 py-0.5 rounded">
+                      (เมื่อ {new Date(lastSyncResult.syncedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น. วันที่ {lastSyncResult.date})
+                    </span>
+                  )}
                 </div>
                 {lastSyncResult.success && lastSyncResult.totalSynced > 0 && (
                   <div className="flex items-center gap-3 text-indigo-200">

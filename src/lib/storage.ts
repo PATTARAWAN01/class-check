@@ -13,6 +13,7 @@ import { db, isFirebaseConfigured } from "./firebase";
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   setDoc,
   deleteDoc,
@@ -764,4 +765,25 @@ export async function syncAllToFirestore(): Promise<{ success: boolean; message:
     success: true,
     message: `ซิงก์ข้อมูลหลักขึ้น Firebase Firestore สำเร็จเรียบร้อยแล้ว (ครู ${INITIAL_TEACHERS.length} ท่าน, ${INITIAL_CLASSROOMS.length} ห้องเรียน, รายวิชา ${INITIAL_SUBJECTS.length} วิชา, ตารางสอน ${INITIAL_TIMETABLE.length} คาบ)`,
   };
+}
+
+export async function getSubstituteSyncStatus(): Promise<{
+  lastSyncedAt?: string;
+  lastSyncedDate?: string;
+  totalCount?: number;
+  assignedCount?: number;
+  unassignedCount?: number;
+  status?: string;
+  message?: string;
+} | null> {
+  if (!db) return null;
+  try {
+    const snap = await getDoc(doc(db, "system_sync_status", "substitute"));
+    if (snap.exists()) {
+      return snap.data() as any;
+    }
+  } catch (err) {
+    console.warn("Could not get substitute sync status:", err);
+  }
+  return null;
 }
