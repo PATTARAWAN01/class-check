@@ -40,6 +40,8 @@ import {
   Copy,
   Check,
   Save,
+  Loader2,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import SubstituteOcrImporter from "@/components/SubstituteOcrImporter";
@@ -200,6 +202,9 @@ export default function AdminPage() {
   const [subSearch, setSubSearch] = useState("");
   const [subDeptFilter, setSubDeptFilter] = useState("all");
   const [subHistoryView, setSubHistoryView] = useState<"teachers" | "schedule">("teachers");
+  const [isSyncingSub, setIsSyncingSub] = useState(false);
+  const [syncTargetDate, setSyncTargetDate] = useState(() => getThaiDateString());
+  const [lastSyncResult, setLastSyncResult] = useState<any>(null);
 
   // Check cached login
   useEffect(() => {
@@ -810,6 +815,30 @@ export default function AdminPage() {
     const updated = await getSubstituteAssignments();
     setSubstitutes(updated);
     showNotice("ยกเลิกรายการจัดสอนแทนเรียบร้อยแล้ว", "success");
+  };
+
+  const handleTriggerNetlifySync = async (dateToSync?: string) => {
+    const finalDate = dateToSync || syncTargetDate || getThaiDateString();
+    try {
+      setIsSyncingSub(true);
+      const res = await fetch(`/api/substitute/cron-sync?date=${encodeURIComponent(finalDate)}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      setLastSyncResult(data);
+      if (data.success) {
+        const refreshed = await getSubstituteAssignments();
+        setSubstitutes(refreshed);
+        showNotice(`⚡ ${data.message}`, "success");
+      } else {
+        showNotice(`เกิดข้อผิดพลาดในการซิงก์: ${data.message || data.error}`, "error");
+      }
+    } catch (e: any) {
+      console.error(e);
+      showNotice("เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์", "error");
+    } finally {
+      setIsSyncingSub(false);
+    }
   };
 
   const showNotice = (text: string, type: "success" | "error" = "success") => {
@@ -2199,6 +2228,104 @@ export default function AdminPage() {
       {/* ========================================================== */}
       {activeTab === "substitute" && (
         <div className="space-y-6">
+          {/* Hero Auto-Sync Card: nongwuaso-sub.netlify.app */}
+          <div className="bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 rounded-2xl p-6 text-white shadow-lg border border-indigo-700/50 relative overflow-hidden">
+            <div className="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Auto-Sync ทุกเช้า 08:30 น. (จันทร์ - ศุกร์)
+                  </span>
+                  <a
+                    href="https://nongwuaso-sub.netlify.app/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-sky-500/20 text-sky-300 border border-sky-500/30 hover:bg-sky-500/30 transition-colors"
+                  >
+                    nongwuaso-sub.netlify.app ↗
+                  </a>
+                </div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-amber-400 fill-amber-400" />
+                  ดึงและซิงก์ข้อมูลจัดสอนแทนอัตโนมัติ
+                </h3>
+                <p className="text-xs text-indigo-200/80 max-w-2xl leading-relaxed">
+                  ระบบจะดึงข้อมูลการจัดสอนแทนจากเว็บ Nongwuaso-sub อัตโนมัติทุกเช้า 08:30 น. (ก่อนคาบ 1) พร้อมจับคู่ครูผู้สอน ห้องเรียน และรหัสวิชาในระบบทันที หรือเลือกวันที่แล้วกดปุ่มสั่งซิงก์ด้วยตนเองได้ทันที
+                </p>
+              </div>
+
+              {/* Sync Controls */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-white/10 backdrop-blur-md p-2.5 rounded-xl border border-white/10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={syncTargetDate}
+                    onChange={(e) => setSyncTargetDate(e.target.value)}
+                    className="bg-white text-slate-800 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSyncTargetDate(getThaiDateString())}
+                    className="px-2.5 py-2 text-xs font-medium bg-indigo-700/60 hover:bg-indigo-600/80 text-white rounded-lg transition-colors whitespace-nowrap"
+                    title="เลือกวันที่ปัจจุบัน"
+                  >
+                    วันนี้
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleTriggerNetlifySync()}
+                  disabled={isSyncingSub}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 text-slate-900 font-bold text-xs rounded-lg shadow-md transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
+                >
+                  {isSyncingSub ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-slate-900" />
+                      <span>กำลังซิงก์ข้อมูล...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 fill-slate-900" />
+                      <span>⚡ ซิงก์ข้อมูลทันที</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Sync Feedback Box */}
+            {lastSyncResult && (
+              <div className="mt-4 pt-4 border-t border-indigo-700/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  {lastSyncResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                  <span className={lastSyncResult.success ? "text-emerald-200 font-medium" : "text-rose-200 font-medium"}>
+                    {lastSyncResult.message}
+                  </span>
+                </div>
+                {lastSyncResult.success && lastSyncResult.totalSynced > 0 && (
+                  <div className="flex items-center gap-3 text-indigo-200">
+                    <span>มีผู้สอนแทน: <strong className="text-white">{lastSyncResult.assignedCount}</strong> คาบ</span>
+                    <span>รอจัดสอนแทน: <strong className="text-amber-300">{lastSyncResult.unassignedCount}</strong> คาบ</span>
+                    <button
+                      type="button"
+                      onClick={() => setSubTab("history")}
+                      className="text-amber-300 hover:text-amber-200 underline text-xs font-semibold"
+                    >
+                      ดูในแท็บประวัติ →
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Main Card Header */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-5">
