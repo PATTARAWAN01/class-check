@@ -37,7 +37,6 @@ import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/
 import { getEffectivePeriodCount, deduplicateAttendanceRecords, getSpecialNonCheckedPeriodInfo } from "@/lib/attendanceUtils";
 import ClassroomPeriodMatrixModal from "@/components/ClassroomPeriodMatrixModal";
 
-type TimeFilter = "today" | "week" | "month" | "term" | "custom";
 
 export default function StatisticsPage() {
   const [terms, setTerms] = useState<AcademicTerm[]>([]);
@@ -57,8 +56,10 @@ export default function StatisticsPage() {
   // View Mode: Regular Teaching Attendance vs Substitute Teaching Stats
   const [statViewMode, setStatViewMode] = useState<"attendance" | "substitute">("attendance");
 
-  // Filters (in Thai Bangkok Timezone UTC+7)
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>("today");
+  // Filters: Teacher Table Scope (Daily vs Date Range in Thai Bangkok Timezone UTC+7)
+  const [teacherReportMode, setTeacherReportMode] = useState<"daily" | "range">("daily");
+  const [teacherReportDate, setTeacherReportDate] = useState(() => getThaiDateString());
+  const [rangePreset, setRangePreset] = useState<"week" | "month" | "term" | "custom">("week");
   const [customStartDate, setCustomStartDate] = useState(() => getThaiOffsetDate(7));
   const [customEndDate, setCustomEndDate] = useState(() => getThaiDateString());
   const [searchTeacher, setSearchTeacher] = useState("");
@@ -108,48 +109,32 @@ export default function StatisticsPage() {
     return () => unsubscribe();
   }, []);
 
-  // Filter records by Term and Time range
+  // Filter records by Term and Teacher Report Mode (Daily vs Date Range)
   const filteredRecords = useMemo(() => {
     if (!selectedTermId) return [];
 
     let list = allAttendance.filter((r) => r.termId === selectedTermId);
 
-    const todayStr = getThaiDateString();
-
-    if (timeFilter === "today") {
-      list = list.filter((r) => r.date === todayStr);
-    } else if (timeFilter === "week") {
-      const weekAgoStr = getThaiOffsetDate(7);
-      list = list.filter((r) => r.date >= weekAgoStr && r.date <= todayStr);
-    } else if (timeFilter === "month") {
-      const currentYearMonth = todayStr.substring(0, 7);
-      list = list.filter((r) => r.date.startsWith(currentYearMonth));
-    } else if (timeFilter === "custom") {
+    if (teacherReportMode === "daily") {
+      list = list.filter((r) => r.date === teacherReportDate);
+    } else {
       list = list.filter((r) => r.date >= customStartDate && r.date <= customEndDate);
     }
 
     // Deduplicate records: safely resolve overlapping periods per room & date, keeping only latest check-in
     return deduplicateAttendanceRecords(list);
-  }, [allAttendance, selectedTermId, timeFilter, customStartDate, customEndDate]);
+  }, [allAttendance, selectedTermId, teacherReportMode, teacherReportDate, customStartDate, customEndDate]);
 
-  // Filter substitute records by Time range and Department
+  // Filter substitute records by Teacher Report scope and Department
   const filteredSubstitutes = useMemo(() => {
     let list = substitutes;
     if (selectedTermId) {
       list = list.filter((s) => !s.termId || s.termId === selectedTermId);
     }
 
-    const todayStr = getThaiDateString();
-
-    if (timeFilter === "today") {
-      list = list.filter((s) => s.date === todayStr);
-    } else if (timeFilter === "week") {
-      const weekAgoStr = getThaiOffsetDate(7);
-      list = list.filter((s) => s.date >= weekAgoStr && s.date <= todayStr);
-    } else if (timeFilter === "month") {
-      const currentYearMonth = todayStr.substring(0, 7);
-      list = list.filter((s) => s.date.startsWith(currentYearMonth));
-    } else if (timeFilter === "custom") {
+    if (teacherReportMode === "daily") {
+      list = list.filter((s) => s.date === teacherReportDate);
+    } else {
       list = list.filter((s) => s.date >= customStartDate && s.date <= customEndDate);
     }
 
@@ -175,10 +160,10 @@ export default function StatisticsPage() {
     }
 
     return list.sort((a, b) => b.date.localeCompare(a.date) || a.periodStart - b.periodStart);
-  }, [substitutes, selectedTermId, timeFilter, customStartDate, customEndDate, selectedDept, searchTeacher]);
+  }, [substitutes, selectedTermId, teacherReportMode, teacherReportDate, customStartDate, customEndDate, selectedDept, searchTeacher]);
 
-  // Overall KPIs
-  const kpis = useMemo(() => {
+  // Daily Matrix KPIs (Reflects the day shown in the Matrix Table)
+  const dailyKpis = useMemo(() => {
     let totalPeriods = 0;
     let onTimePeriods = 0;
     let latePeriods = 0;
@@ -188,7 +173,13 @@ export default function StatisticsPage() {
     let absentActivity = 0;
     let absentOther = 0;
 
-    filteredRecords.forEach((r) => {
+    const dayRecords = deduplicateAttendanceRecords(
+      allAttendance.filter(
+        (r) => (!selectedTermId || r.termId === selectedTermId) && r.date === matrixDate
+      )
+    );
+
+    dayRecords.forEach((r) => {
       const count = getEffectivePeriodCount(r, timetable);
       totalPeriods += count;
       if (r.status === "on_time") {
@@ -222,7 +213,10 @@ export default function StatisticsPage() {
       absentPercent: Math.round(absentPercent * 10) / 10,
       totalAttendanceRate: Math.round(totalAttendanceRate * 10) / 10,
     };
-  }, [filteredRecords, timetable]);
+  }, [allAttendance, selectedTermId, matrixDate, timetable]);
+
+  // Backward compatibility alias for any remaining references
+  const kpis = dailyKpis;
 
   // Teacher aggregated statistics
   const teacherStats = useMemo(() => {
@@ -307,14 +301,22 @@ export default function StatisticsPage() {
     };
   }, [filteredSubstitutes]);
 
-  // Handle Export Excel
-  const handleExportExcel = () => {
+  // Handle Export Excel (Uses currently selected Teacher Report scope)
+  const handleExportTeacherStatsExcel = () => {
     const termLabel = currentTerm ? `เทอม${currentTerm.term}_${currentTerm.year}` : "all";
+    const dateLabel =
+      teacherReportMode === "daily"
+        ? `วัน_${teacherReportDate}`
+        : `ช่วง_${customStartDate}_ถึง_${customEndDate}`;
     exportAttendanceToExcel(
       filteredRecords,
       schoolProfile?.schoolName || "โรงเรียน",
-      `${termLabel}_${timeFilter}`
+      `${termLabel}_${dateLabel}`
     );
+  };
+
+  const handleExportExcel = () => {
+    handleExportTeacherStatsExcel();
   };
 
   function getTeacherFirstName(fullName: string = ""): string {
@@ -473,152 +475,118 @@ export default function StatisticsPage() {
             <span>สถิติการจัดสอนแทนย้อนหลัง ({substitutes.length})</span>
           </button>
         </div>
-
-        {/* Time Filters Bar */}
-        <div className="mt-4 pt-4 border-t border-white/10 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-400 font-medium mr-1 flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5" /> ช่วงเวลา:
-          </span>
-
-          {[
-            { id: "today", label: "วันนี้" },
-            { id: "week", label: "7 วันล่าสุด (สัปดาห์นี้)" },
-            { id: "month", label: "เดือนนี้" },
-            { id: "term", label: "ทั้งภาคเรียน" },
-            { id: "custom", label: "📅 กำหนดช่วงเวลา (ปฏิทิน)" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setTimeFilter(tab.id as TimeFilter)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                timeFilter === tab.id
-                  ? "bg-white text-slate-900 shadow-md scale-105"
-                  : "bg-white/10 hover:bg-white/20 text-white"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-
-          {/* Custom Date Range Picker */}
-          {timeFilter === "custom" && (
-            <div className="flex flex-wrap items-center gap-2 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700 text-xs ml-auto">
-              <span className="text-slate-300">ตั้งแต่:</span>
-              <input
-                type="date"
-                value={customStartDate}
-                onChange={(e) => setCustomStartDate(e.target.value)}
-                className="bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-white text-xs font-bold focus:ring-1 focus:ring-sky-400"
-              />
-              <span className="text-slate-300">ถึง:</span>
-              <input
-                type="date"
-                value={customEndDate}
-                onChange={(e) => setCustomEndDate(e.target.value)}
-                className="bg-slate-900 border border-slate-600 rounded-lg px-2 py-1 text-white text-xs font-bold focus:ring-1 focus:ring-sky-400"
-              />
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ==================== ATTENDANCE STATS VIEW ==================== */}
       {statViewMode === "attendance" && (
         <>
-          {/* KPI STAT CARDS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Total Teaching */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            คาบสอนที่มีการเช็ค
-          </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-800">
-              {kpis.totalPeriods}
+          {/* DAILY KPI STATS HEADER */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 px-1">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="font-bold text-sm sm:text-base text-slate-800">
+                สถิติการปฏิบัติการสอนประจำวัน &bull; ประจำ{formatThaiDateLong(matrixDate)}
+              </span>
+            </div>
+            <span className="text-xs text-slate-500 font-medium">
+              (สรุปภาพรวมจากตารางเรียน 27 ห้องเรียนด้านล่าง)
             </span>
-            <span className="text-xs text-slate-500 font-medium">คาบ</span>
           </div>
-          <div className="mt-3 flex items-center gap-1.5 text-xs text-sky-600 font-medium">
-            <span>อัตราเข้าสอนรวม {kpis.totalAttendanceRate}%</span>
-          </div>
-          <div className="absolute right-3 bottom-3 text-slate-100 -z-0">
-            <BarChart3 className="w-14 h-14" />
-          </div>
-        </div>
 
-        {/* Card 2: On-time */}
-        <div className="bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm bg-gradient-to-b from-white to-emerald-50/30">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">
-              เข้าสอนตรงเวลา
-            </span>
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-          </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-emerald-700">
-              {kpis.onTimePercent}%
-            </span>
-            <span className="text-xs text-emerald-600 font-medium">
-              ({kpis.onTimePeriods} คาบ)
-            </span>
-          </div>
-          <div className="mt-3 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-            <div
-              className="bg-emerald-500 h-full rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(kpis.onTimePercent, 100)}%` }}
-            ></div>
-          </div>
-        </div>
+          {/* KPI STAT CARDS (Daily Matrix Overview) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Total Teaching */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                คาบสอนที่มีการเช็คประจำวัน
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold text-slate-800">
+                  {dailyKpis.totalPeriods}
+                </span>
+                <span className="text-xs text-slate-500 font-medium">คาบ</span>
+              </div>
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-sky-600 font-medium">
+                <span>อัตราเข้าสอนรวม {dailyKpis.totalAttendanceRate}%</span>
+              </div>
+              <div className="absolute right-3 bottom-3 text-slate-100 -z-0">
+                <BarChart3 className="w-14 h-14" />
+              </div>
+            </div>
 
-        {/* Card 3: Late */}
-        <div className="bg-white rounded-2xl p-5 border border-amber-100 shadow-sm bg-gradient-to-b from-white to-amber-50/30">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-amber-800 uppercase tracking-wider">
-              เข้าสอนหลัง 10 นาที (สาย)
-            </span>
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-          </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-amber-700">
-              {kpis.latePercent}%
-            </span>
-            <span className="text-xs text-amber-600 font-medium">
-              ({kpis.latePeriods} คาบ)
-            </span>
-          </div>
-          <div className="mt-3 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-            <div
-              className="bg-amber-500 h-full rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(kpis.latePercent, 100)}%` }}
-            ></div>
-          </div>
-        </div>
+            {/* Card 2: On-time */}
+            <div className="bg-white rounded-2xl p-5 border border-emerald-100 shadow-sm bg-gradient-to-b from-white to-emerald-50/30">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">
+                  เข้าสอนตรงเวลา
+                </span>
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold text-emerald-700">
+                  {dailyKpis.onTimePercent}%
+                </span>
+                <span className="text-xs text-emerald-600 font-medium">
+                  ({dailyKpis.onTimePeriods} คาบ)
+                </span>
+              </div>
+              <div className="mt-3 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(dailyKpis.onTimePercent, 100)}%` }}
+                ></div>
+              </div>
+            </div>
 
-        {/* Card 4: Absent */}
-        <div className="bg-white rounded-2xl p-5 border border-rose-100 shadow-sm bg-gradient-to-b from-white to-rose-50/30">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-rose-800 uppercase tracking-wider">
-              ไม่เข้าสอน
-            </span>
-            <XCircle className="w-5 h-5 text-rose-600" />
+            {/* Card 3: Late */}
+            <div className="bg-white rounded-2xl p-5 border border-amber-100 shadow-sm bg-gradient-to-b from-white to-amber-50/30">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-amber-800 uppercase tracking-wider">
+                  เข้าสอนหลัง 10 นาที (สาย)
+                </span>
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold text-amber-700">
+                  {dailyKpis.latePercent}%
+                </span>
+                <span className="text-xs text-amber-600 font-medium">
+                  ({dailyKpis.latePeriods} คาบ)
+                </span>
+              </div>
+              <div className="mt-3 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-amber-500 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(dailyKpis.latePercent, 100)}%` }}
+                ></div>
+              </div>
+            </div>
+
+            {/* Card 4: Absent */}
+            <div className="bg-white rounded-2xl p-5 border border-rose-100 shadow-sm bg-gradient-to-b from-white to-rose-50/30">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-rose-800 uppercase tracking-wider">
+                  ไม่เข้าสอน
+                </span>
+                <XCircle className="w-5 h-5 text-rose-600" />
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold text-rose-700">
+                  {dailyKpis.absentPercent}%
+                </span>
+                <span className="text-xs text-rose-600 font-medium">
+                  ({dailyKpis.absentPeriods} คาบ)
+                </span>
+              </div>
+              <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500">
+                <span>ประชุม: {dailyKpis.absentMeeting}</span>
+                <span>&bull;</span>
+                <span>กิจกรรม: {dailyKpis.absentActivity}</span>
+                <span>&bull;</span>
+                <span>อื่นๆ: {dailyKpis.absentOther}</span>
+              </div>
+            </div>
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-rose-700">
-              {kpis.absentPercent}%
-            </span>
-            <span className="text-xs text-rose-600 font-medium">
-              ({kpis.absentPeriods} คาบ)
-            </span>
-          </div>
-          <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500">
-            <span>ประชุม: {kpis.absentMeeting}</span>
-            <span>&bull;</span>
-            <span>กิจกรรมสำคัญ: {kpis.absentActivity}</span>
-            <span>&bull;</span>
-            <span>อื่นๆ: {kpis.absentOther}</span>
-          </div>
-        </div>
-      </div>
 
       {/* ========================================================== */}
       {/* 27 CLASSROOMS x 7 PERIODS MATRIX SECTION */}
@@ -922,47 +890,224 @@ export default function StatisticsPage() {
         </div>
       </div>
 
-      {/* SEARCH & DEPARTMENT FILTER */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
-        {/* Search Input */}
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchTeacher}
-            onChange={(e) => setSearchTeacher(e.target.value)}
-            placeholder="ค้นหาชื่อครู หรือรหัสครู..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500 text-xs text-slate-700"
-          />
-        </div>
-
-        {/* Department Dropdown */}
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-          <select
-            value={selectedDept}
-            onChange={(e) => setSelectedDept(e.target.value)}
-            className="w-full md:w-64 px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white"
-          >
-            <option value="all">ทุกกลุ่มสาระการเรียนรู้</option>
-            {DEPARTMENTS.map((d) => (
-              <option key={d} value={d}>
-                {d.replace("กลุ่มสาระการเรียนรู้", "")}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* TEACHERS STATISTICS TABLE */}
+      {/* ========================================================== */}
+      {/* TEACHERS STATISTICS TABLE WITH INTEGRATED FILTERS */}
+      {/* ========================================================== */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="font-bold text-slate-800 text-base">
-            ตารางสรุปการเข้าสอนรายบุคคล
-          </h2>
-          <span className="text-xs text-slate-500 font-semibold">
-            ครู {teacherStats.length} ท่าน
-          </span>
+        {/* Table Header & Controls Toolbar */}
+        <div className="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/60 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-sky-100 text-sky-800 flex items-center justify-center shrink-0">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-bold text-slate-800 text-base sm:text-lg leading-tight">
+                    ตารางสรุปการเข้าสอนรายบุคคล
+                  </h2>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">
+                    ครู {teacherStats.length} ท่าน
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {teacherReportMode === "daily" ? (
+                    <>
+                      สถิติรายวัน &bull; ประจำ{formatThaiDateLong(teacherReportDate)}
+                    </>
+                  ) : (
+                    <>
+                      สถิติสะสมช่วงเวลา &bull; ตั้งแต่ {formatThaiDateLong(customStartDate)} ถึง {formatThaiDateLong(customEndDate)}
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Mode Toggle (Daily vs Range) & Export Button */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setTeacherReportMode("daily")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    teacherReportMode === "daily"
+                      ? "bg-sky-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>รายวัน</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTeacherReportMode("range")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    teacherReportMode === "range"
+                      ? "bg-sky-600 text-white shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>เป็นช่วงเวลา</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportTeacherStatsExcel}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                title="ส่งออกสถิติครูรายบุคคลตามช่วงเวลานี้เป็น Excel"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>ส่งออก Excel</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Sub-Filters: Date Range / Daily Pickers + Search + Department */}
+          <div className="pt-3 border-t border-slate-200/60 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            {/* Left: Active Mode Specific Date Selectors */}
+            <div className="flex flex-wrap items-center gap-2">
+              {teacherReportMode === "daily" ? (
+                <div className="flex flex-wrap items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs shadow-2xs">
+                  <span className="text-slate-500 text-[11px]">วันที่:</span>
+                  <input
+                    type="date"
+                    value={teacherReportDate}
+                    onChange={(e) => setTeacherReportDate(e.target.value)}
+                    className="bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setTeacherReportDate(getThaiDateString())}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all ${
+                      teacherReportDate === getThaiDateString()
+                        ? "bg-sky-100 text-sky-800"
+                        : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                    }`}
+                  >
+                    วันนี้
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTeacherReportDate(getThaiOffsetDate(1))}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-all ${
+                      teacherReportDate === getThaiOffsetDate(1)
+                        ? "bg-sky-100 text-sky-800"
+                        : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                    }`}
+                  >
+                    เมื่อวาน
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs shadow-2xs">
+                    <span className="text-slate-500 text-[11px]">ตั้งแต่:</span>
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      onChange={(e) => {
+                        setCustomStartDate(e.target.value);
+                        setRangePreset("custom");
+                      }}
+                      className="bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer text-xs"
+                    />
+                    <span className="text-slate-400 text-[11px]">ถึง</span>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={(e) => {
+                        setCustomEndDate(e.target.value);
+                        setRangePreset("custom");
+                      }}
+                      className="bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer text-xs"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomStartDate(getThaiOffsetDate(7));
+                        setCustomEndDate(getThaiDateString());
+                        setRangePreset("week");
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        rangePreset === "week"
+                          ? "bg-sky-600 text-white shadow-xs"
+                          : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-200"
+                      }`}
+                    >
+                      7 วันล่าสุด
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const today = getThaiDateString();
+                        setCustomStartDate(`${today.substring(0, 7)}-01`);
+                        setCustomEndDate(today);
+                        setRangePreset("month");
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        rangePreset === "month"
+                          ? "bg-sky-600 text-white shadow-xs"
+                          : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-200"
+                      }`}
+                    >
+                      เดือนนี้
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomStartDate("2026-11-01");
+                        setCustomEndDate(getThaiDateString());
+                        setRangePreset("term");
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        rangePreset === "term"
+                          ? "bg-sky-600 text-white shadow-xs"
+                          : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-200"
+                      }`}
+                    >
+                      ทั้งภาคเรียน
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Search Input & Department Dropdown */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+              <div className="relative w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchTeacher}
+                  onChange={(e) => setSearchTeacher(e.target.value)}
+                  placeholder="ค้นหาชื่อครู หรือรหัส..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500 text-xs text-slate-700 bg-white"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <select
+                  value={selectedDept}
+                  onChange={(e) => setSelectedDept(e.target.value)}
+                  className="w-full sm:w-48 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white cursor-pointer"
+                >
+                  <option value="all">ทุกกลุ่มสาระฯ</option>
+                  {DEPARTMENTS.map((d) => (
+                    <option key={d} value={d}>
+                      {d.replace("กลุ่มสาระการเรียนรู้", "")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Desktop & Tablet Table View */}
@@ -1421,7 +1566,7 @@ export default function StatisticsPage() {
             <div className="p-5 sm:p-6 bg-gradient-to-r from-sky-700 via-indigo-700 to-indigo-800 text-white flex items-center justify-between sticky top-0 z-30 shrink-0 shadow-md pr-16">
               <div>
                 <div className="text-xs text-sky-200 uppercase tracking-wider font-semibold">
-                  ประวัติการเข้าสอนรายบุคคล
+                  ประวัติการเข้าสอน &bull; {teacherReportMode === "daily" ? `ประจำ${formatThaiDateLong(teacherReportDate)}` : `ช่วง ${formatThaiDateLong(customStartDate)} - ${formatThaiDateLong(customEndDate)}`}
                 </div>
                 <h3 className="text-xl font-bold mt-0.5">
                   {inspectTeacher.prefix}{inspectTeacher.fullName}
