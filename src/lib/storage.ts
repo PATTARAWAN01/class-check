@@ -699,6 +699,95 @@ export async function deleteSubstituteAssignment(id: string): Promise<void> {
   setLocal(STORAGE_KEYS.SUBSTITUTES, filtered);
 }
 
+export async function deleteSubstituteAssignmentsByDate(date: string): Promise<number> {
+  let count = 0;
+  if (db) {
+    try {
+      const q = query(collection(db, "substitute_assignments"), where("date", "==", date));
+      const snap = await getDocs(q);
+      const docsToDelete = snap.docs;
+      count = docsToDelete.length;
+
+      // Batch delete in chunks of 400
+      for (let i = 0; i < docsToDelete.length; i += 400) {
+        const chunk = docsToDelete.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+
+      // Update sync status metadata if date matches
+      await setDoc(doc(db, "system_sync_status", "substitute"), {
+        lastSyncedAt: new Date().toISOString(),
+        lastSyncedDate: date,
+        totalCount: 0,
+        assignedCount: 0,
+        unassignedCount: 0,
+        status: "cleared",
+        message: `ล้างข้อมูลการจัดสอนแทนวันที่ ${date} เรียบร้อยแล้ว`,
+      });
+    } catch (e) {
+      console.warn("Firestore error deleting substitute assignments by date:", e);
+    }
+  }
+
+  // Update local storage
+  const current = getLocal<SubstituteAssignment[]>(STORAGE_KEYS.SUBSTITUTES, []);
+  const filtered = current.filter((s) => s.date !== date);
+  if (count === 0) {
+    count = current.length - filtered.length;
+  }
+  setLocal(STORAGE_KEYS.SUBSTITUTES, filtered);
+
+  return count;
+}
+
+export async function deleteSubstituteAssignmentsByTeacher(date: string, teacherName: string): Promise<number> {
+  let count = 0;
+  const cleanTarget = teacherName.replace(/^(นาย|นางสาว|นาง|ว่าที่ร้อยตรี|ดร\.)\s*/, "").trim();
+
+  if (db) {
+    try {
+      const q = query(collection(db, "substitute_assignments"), where("date", "==", date));
+      const snap = await getDocs(q);
+      const docsToDelete = snap.docs.filter((d) => {
+        const data = d.data() as SubstituteAssignment;
+        const origClean = (data.originalTeacherName || "").replace(/^(นาย|นางสาว|นาง|ว่าที่ร้อยตรี|ดร\.)\s*/, "").trim();
+        const subClean = (data.substituteTeacherName || "").replace(/^(นาย|นางสาว|นาง|ว่าที่ร้อยตรี|ดร\.)\s*/, "").trim();
+        return origClean === cleanTarget || subClean === cleanTarget;
+      });
+
+      count = docsToDelete.length;
+
+      // Batch delete
+      for (let i = 0; i < docsToDelete.length; i += 400) {
+        const chunk = docsToDelete.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn("Firestore error deleting substitute assignments by teacher:", e);
+    }
+  }
+
+  // Update local storage
+  const current = getLocal<SubstituteAssignment[]>(STORAGE_KEYS.SUBSTITUTES, []);
+  const filtered = current.filter((s) => {
+    if (s.date !== date) return true;
+    const origClean = (s.originalTeacherName || "").replace(/^(นาย|นางสาว|นาง|ว่าที่ร้อยตรี|ดร\.)\s*/, "").trim();
+    const subClean = (s.substituteTeacherName || "").replace(/^(นาย|นางสาว|นาง|ว่าที่ร้อยตรี|ดร\.)\s*/, "").trim();
+    return origClean !== cleanTarget && subClean !== cleanTarget;
+  });
+
+  if (count === 0) {
+    count = current.length - filtered.length;
+  }
+  setLocal(STORAGE_KEYS.SUBSTITUTES, filtered);
+
+  return count;
+}
+
 export function subscribeSubstituteAssignments(callback: (records: SubstituteAssignment[]) => void) {
   if (!db) {
     callback(getLocal<SubstituteAssignment[]>(STORAGE_KEYS.SUBSTITUTES, []));

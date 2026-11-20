@@ -74,6 +74,8 @@ import {
   getSubstituteAssignments,
   saveSubstituteAssignment,
   deleteSubstituteAssignment,
+  deleteSubstituteAssignmentsByDate,
+  deleteSubstituteAssignmentsByTeacher,
   getSubstituteSyncStatus,
   subscribeSubstituteAssignments,
   subscribeSubstituteSyncStatus,
@@ -208,6 +210,21 @@ export default function AdminPage() {
   const [isSyncingSub, setIsSyncingSub] = useState(false);
   const [syncTargetDate, setSyncTargetDate] = useState(() => getThaiDateString());
   const [lastSyncResult, setLastSyncResult] = useState<any>(null);
+  const [subDeleteModal, setSubDeleteModal] = useState<{
+    isOpen: boolean;
+    type: "date" | "teacher" | "period";
+    date: string;
+    teacherName?: string;
+    periodId?: string;
+    periodLabel?: string;
+    count: number;
+  }>({
+    isOpen: false,
+    type: "date",
+    date: "",
+    count: 0,
+  });
+  const [isDeletingSub, setIsDeletingSub] = useState(false);
 
   // Check cached login
   useEffect(() => {
@@ -846,12 +863,70 @@ export default function AdminPage() {
     );
   };
 
+  const handleOpenDeleteDateModal = (targetDate: string) => {
+    const count = substitutes.filter((s) => s.date === targetDate).length;
+    setSubDeleteModal({
+      isOpen: true,
+      type: "date",
+      date: targetDate,
+      count,
+    });
+  };
+
+  const handleOpenDeleteTeacherModal = (teacherName: string, date: string, count: number) => {
+    setSubDeleteModal({
+      isOpen: true,
+      type: "teacher",
+      date,
+      teacherName,
+      count,
+    });
+  };
+
+  const handleOpenDeletePeriodModal = (periodId: string, label: string, date: string) => {
+    setSubDeleteModal({
+      isOpen: true,
+      type: "period",
+      date,
+      periodId,
+      periodLabel: label,
+      count: 1,
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!subDeleteModal.isOpen) return;
+    try {
+      setIsDeletingSub(true);
+      let deletedCount = 0;
+      if (subDeleteModal.type === "date") {
+        deletedCount = await deleteSubstituteAssignmentsByDate(subDeleteModal.date);
+        showNotice(`ลบข้อมูลการจัดสอนแทนวันที่ ${subDeleteModal.date} เรียบร้อยแล้ว (${deletedCount} คาบ)`, "success");
+      } else if (subDeleteModal.type === "teacher" && subDeleteModal.teacherName) {
+        deletedCount = await deleteSubstituteAssignmentsByTeacher(subDeleteModal.date, subDeleteModal.teacherName);
+        showNotice(`ลบข้อมูลการจัดสอนแทนของ ${subDeleteModal.teacherName} เรียบร้อยแล้ว (${deletedCount} คาบ)`, "success");
+      } else if (subDeleteModal.type === "period" && subDeleteModal.periodId) {
+        await deleteSubstituteAssignment(subDeleteModal.periodId);
+        showNotice("ยกเลิก/ลบรายการสอนแทนเรียบร้อยแล้ว", "success");
+      }
+      const updated = await getSubstituteAssignments();
+      setSubstitutes(updated);
+      setSubDeleteModal((prev) => ({ ...prev, isOpen: false }));
+    } catch (err: any) {
+      console.error("handleConfirmDelete error:", err);
+      showNotice("เกิดข้อผิดพลาดในการลบข้อมูล", "error");
+    } finally {
+      setIsDeletingSub(false);
+    }
+  };
+
   const handleDeleteSubstitute = async (id: string) => {
-    if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการยกเลิก/ลบรายการจัดสอนแทนนี้?")) return;
-    await deleteSubstituteAssignment(id);
-    const updated = await getSubstituteAssignments();
-    setSubstitutes(updated);
-    showNotice("ยกเลิกรายการจัดสอนแทนเรียบร้อยแล้ว", "success");
+    const item = substitutes.find((s) => s.id === id);
+    handleOpenDeletePeriodModal(
+      id,
+      item ? `${item.originalTeacherName} (${item.gradeRoom} คาบ ${item.periodStart})` : "รายการนี้",
+      item?.date || getThaiDateString()
+    );
   };
 
   const handleTriggerNetlifySync = async (dateToSync?: string) => {
@@ -2315,7 +2390,7 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={() => handleTriggerNetlifySync()}
-                  disabled={isSyncingSub}
+                  disabled={isSyncingSub || isDeletingSub}
                   className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 text-slate-900 font-bold text-xs rounded-lg shadow-md transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
                 >
                   {isSyncingSub ? (
@@ -2329,6 +2404,17 @@ export default function AdminPage() {
                       <span>⚡ ซิงก์ข้อมูลทันที</span>
                     </>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenDeleteDateModal(syncTargetDate || getThaiDateString())}
+                  disabled={isSyncingSub || isDeletingSub}
+                  className="px-3.5 py-2 bg-rose-600/90 hover:bg-rose-600 disabled:opacity-50 text-white font-bold text-xs rounded-lg shadow-md transition-all flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer border border-rose-500/60"
+                  title={`ลบข้อมูลสอนแทนทั้งหมดของวันที่ ${syncTargetDate || getThaiDateString()} ออกจากระบบ`}
+                >
+                  <Trash2 className="w-4 h-4 text-rose-100" />
+                  <span>ลบข้อมูลของวัน</span>
                 </button>
               </div>
             </div>
@@ -2631,6 +2717,22 @@ export default function AdminPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    {filteredAdminSubstitutes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dateToDelete = subTimeFilter === "today" ? getThaiDateString() : syncTargetDate || getThaiDateString();
+                          handleOpenDeleteDateModal(dateToDelete);
+                        }}
+                        disabled={isDeletingSub}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 text-xs font-semibold rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                        title="ลบข้อมูลสอนแทนทั้งหมดของวันที่เลือก"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>ลบข้อมูลของวัน ({substitutes.filter((s) => s.date === (subTimeFilter === "today" ? getThaiDateString() : syncTargetDate || getThaiDateString())).length} คาบ)</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => setShowSubPdfModal(true)}
@@ -2675,6 +2777,7 @@ export default function AdminPage() {
                           <th className="p-3 whitespace-nowrap text-center">จำนวนคาบสอนแทน</th>
                           <th className="p-3 whitespace-nowrap">ปฏิบัติหน้าที่แทนครู</th>
                           <th className="p-3 whitespace-nowrap">ห้องเรียนที่สอนแทน</th>
+                          <th className="p-3 w-16 text-center whitespace-nowrap">จัดการ</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 bg-white">
@@ -2720,6 +2823,20 @@ export default function AdminPage() {
                                   </span>
                                 ))}
                               </div>
+                            </td>
+                            <td className="p-3 text-center whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const targetDate = subTimeFilter === "today" ? getThaiDateString() : syncTargetDate || getThaiDateString();
+                                  handleOpenDeleteTeacherModal(stat.teacherName, targetDate, stat.totalPeriods);
+                                }}
+                                disabled={isDeletingSub}
+                                className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200 cursor-pointer"
+                                title={`ลบทุกคาบสอนแทนของ ${stat.teacherName} ในวันที่เลือก`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -2824,6 +2941,82 @@ export default function AdminPage() {
               </div>
             )}
           </div>
+
+          {/* Modal Popup: Safety Confirmation for Substitute Deletion */}
+          {subDeleteModal.isOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-rose-100 space-y-4">
+                <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div className="text-center space-y-2">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    ยืนยันการลบข้อมูลการจัดสอนแทน
+                  </h3>
+                  <div className="text-xs text-slate-600 leading-relaxed">
+                    {subDeleteModal.type === "date" ? (
+                      <div>
+                        คุณต้องการลบข้อมูลการจัดสอนแทนทั้งหมดของวันที่{" "}
+                        <span className="inline-block font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                          {subDeleteModal.date}
+                        </span>{" "}
+                        จำนวน <strong className="text-rose-600 font-bold">{subDeleteModal.count} คาบ</strong> ใช่หรือไม่?
+                      </div>
+                    ) : subDeleteModal.type === "teacher" ? (
+                      <div>
+                        คุณต้องการลบคาบสอนแทนทั้งหมดของ{" "}
+                        <span className="inline-block font-bold text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded">
+                          {subDeleteModal.teacherName}
+                        </span>{" "}
+                        ในวันที่ <span className="font-bold text-slate-900">{subDeleteModal.date}</span>{" "}
+                        (จำนวน <strong className="text-rose-600 font-bold">{subDeleteModal.count} คาบ</strong>) ใช่หรือไม่?
+                      </div>
+                    ) : (
+                      <div>
+                        คุณต้องการลบรายการสอนแทนของ{" "}
+                        <span className="inline-block font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                          {subDeleteModal.periodLabel}
+                        </span>{" "}
+                        ใช่หรือไม่?
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-[11px] text-rose-800 text-left">
+                    ⚠️ <strong>ข้อควรระวัง:</strong> ข้อมูลจะถูกลบออกจากฐานข้อมูล Cloud และหน้าจอทันที ทั้งนี้หลังจากลบแล้ว ท่านสามารถกดปุ่ม <strong>[ ⚡ ซิงก์ข้อมูลทันที ]</strong> เพื่อดึงข้อมูลใหม่ที่ถูกต้องเข้ามาแทนที่ได้ตลอดเวลา
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setSubDeleteModal((prev) => ({ ...prev, isOpen: false }))}
+                    disabled={isDeletingSub}
+                    className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 font-medium text-xs hover:bg-slate-50 transition-colors"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDelete}
+                    disabled={isDeletingSub}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-rose-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isDeletingSub ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>กำลังลบข้อมูล...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        <span>ยืนยันการลบ</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
