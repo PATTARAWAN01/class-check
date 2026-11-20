@@ -12,7 +12,7 @@ export interface SpecialPeriodInfo {
  * Rules based on Nong Wua So Phitthayakhom Curriculum & Schedule:
  * - พุธ คาบ 6: ชุมนุม (ทุกห้อง ทุกระดับชั้น)
  * - พุธ คาบ 7: ลูกเสือ (ม.1-3) / ผู้บำเพ็ญ (ม.4-6)
- * - ศุกร์ คาบ 1: ทักษะชีวิต (ทุกระดับชั้น)
+ * - ศุกร์ คาบ 1: ทักษะชีวิต (ทุกระดับชั้น ยกเว้น ม.1/1, ม.2/1, ม.4/1, ม.5/1 ที่มีตารางเรียนวิชาปกติ)
  * - อังคาร คาบ 7: ติวโอเน็ต สำหรับ ม.3 ทุกห้อง
  * - ม.ต้น เลือกเสรี: ม.1 (อังคาร คาบ 6-7), ม.2 (พฤหัสฯ คาบ 6-7) เป็นคาบคู่ ไม่ต้องเช็ค
  * - ม.ปลาย ซ่อมเสริม: ม.6 (อังคาร คาบ 7, ศุกร์ คาบ 7) ไม่ต้องเช็ค
@@ -85,9 +85,18 @@ export function getSpecialNonCheckedPeriodInfo(
       : { isExcluded: true, label: "ผู้บำเพ็ญ", description: "คาบผู้บำเพ็ญประโยชน์ สำหรับ ม.4-6 (ไม่ต้องเช็คเข้าสอน)" };
   }
 
-  // วันศุกร์ คาบ 1: ทักษะชีวิต (ทุกระดับชั้น ไม่ต้องเช็ค)
+  // วันศุกร์ คาบ 1: ทักษะชีวิต (ทุกระดับชั้น ไม่ต้องเช็ค ยกเว้น ม.1/1, ม.2/1, ม.4/1, ม.5/1 ที่มีตารางเรียนวิชาปกติ)
   if (dayOfWeek === 5 && period === 1) {
-    return { isExcluded: true, label: "ทักษะชีวิต", description: "คาบพัฒนาทักษะชีวิต (ทุกระดับชั้นไม่ต้องเช็คเข้าสอน)" };
+    const normGradeRoom = (gradeRoom || "").trim();
+    const normClassroomId = (classroomId || "").trim();
+    const isAcademicException =
+      ["ม.1/1", "ม.2/1", "ม.4/1", "ม.5/1"].includes(normGradeRoom) ||
+      ["m1_1", "m2_1", "m4_1", "m5_1"].includes(normClassroomId) ||
+      ["1/1", "2/1", "4/1", "5/1"].includes(normGradeRoom.replace("ม.", ""));
+
+    if (!isAcademicException) {
+      return { isExcluded: true, label: "ทักษะชีวิต", description: "คาบพัฒนาทักษะชีวิต (ทุกระดับชั้นไม่ต้องเช็คเข้าสอน)" };
+    }
   }
 
   // วันอังคาร คาบ 7: ม.3 ทุกห้อง ติวโอเน็ต (ไม่ต้องเช็ค)
