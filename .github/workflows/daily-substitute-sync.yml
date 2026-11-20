@@ -1,0 +1,24 @@
+name: Daily Morning Substitute Sync
+
+on:
+  schedule:
+    # 01:28 UTC = 08:28 AM ICT (Monday - Friday)
+    - cron: '28 1 * * 1-5'
+    # 01:33 UTC = 08:33 AM ICT (Monday - Friday fallback)
+    - cron: '33 1 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Substitute Sync
+        run: |
+          echo "Calling Class Check Cron Sync API..."
+          HTTP_RESPONSE=$(curl -s -o response.json -w "%{http_code}" -X POST "https://nwsp-class-check.vercel.app/api/substitute/cron-sync")
+          echo "HTTP Status: $HTTP_RESPONSE"
+          cat response.json
+          if [ "$HTTP_RESPONSE" -ne 200 ]; then
+            echo "Sync API returned status $HTTP_RESPONSE"
+            exit 1
+          fi
