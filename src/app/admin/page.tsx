@@ -75,6 +75,8 @@ import {
   saveSubstituteAssignment,
   deleteSubstituteAssignment,
   getSubstituteSyncStatus,
+  subscribeSubstituteAssignments,
+  subscribeSubstituteSyncStatus,
 } from "@/lib/storage";
 import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
 import {
@@ -281,13 +283,33 @@ export default function AdminPage() {
     if (active) setPdfTermId(active.id);
   }
 
-  // Real-time listener for attendance logs in Admin
+  // Real-time listeners for attendance & substitute records in Admin
   useEffect(() => {
     if (isAuthenticated) {
-      const unsub = subscribeAttendance((records) => {
+      const unsubAtt = subscribeAttendance((records) => {
         setAttendanceLogs(records);
       });
-      return () => unsub();
+      const unsubSub = subscribeSubstituteAssignments((records) => {
+        setSubstitutes(records);
+      });
+      const unsubSync = subscribeSubstituteSyncStatus((syncStatus) => {
+        if (syncStatus) {
+          setLastSyncResult({
+            success: syncStatus.status === "success",
+            message: syncStatus.message || "ซิงก์ข้อมูลอัตโนมัติล่าสุดสำเร็จ",
+            totalSynced: syncStatus.totalCount || 0,
+            assignedCount: syncStatus.assignedCount || 0,
+            unassignedCount: syncStatus.unassignedCount || 0,
+            syncedAt: syncStatus.lastSyncedAt,
+            date: syncStatus.lastSyncedDate,
+          });
+        }
+      });
+      return () => {
+        unsubAtt();
+        unsubSub();
+        unsubSync();
+      };
     }
   }, [isAuthenticated]);
 

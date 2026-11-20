@@ -699,6 +699,49 @@ export async function deleteSubstituteAssignment(id: string): Promise<void> {
   setLocal(STORAGE_KEYS.SUBSTITUTES, filtered);
 }
 
+export function subscribeSubstituteAssignments(callback: (records: SubstituteAssignment[]) => void) {
+  if (!db) {
+    callback(getLocal<SubstituteAssignment[]>(STORAGE_KEYS.SUBSTITUTES, []));
+    return () => {};
+  }
+  const q = query(collection(db, "substitute_assignments"), orderBy("date", "desc"));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const records: SubstituteAssignment[] = [];
+      snapshot.forEach((d) => {
+        records.push(d.data() as SubstituteAssignment);
+      });
+      callback(records);
+    },
+    (error) => {
+      console.warn("Firestore substitute subscription error:", error);
+      callback(getLocal<SubstituteAssignment[]>(STORAGE_KEYS.SUBSTITUTES, []));
+    }
+  );
+}
+
+export function subscribeSubstituteSyncStatus(callback: (status: any) => void) {
+  if (!db) {
+    callback(null);
+    return () => {};
+  }
+  return onSnapshot(
+    doc(db, "system_sync_status", "substitute"),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        callback(snapshot.data());
+      } else {
+        callback(null);
+      }
+    },
+    (error) => {
+      console.warn("Firestore sync status subscription error:", error);
+      callback(null);
+    }
+  );
+}
+
 // ==================== DEPARTMENT PINS ====================
 export async function getDepartmentPins(): Promise<Record<string, string>> {
   checkAndMigrateSeedData();
