@@ -7517,12 +7517,12 @@ export const SCHOOL_TIMETABLE: TimetableEntry[] = [
     "periodEnd": 2,
     "classroomId": "m3_4",
     "gradeRoom": "ม.3/4",
-    "subjectId": "subj_ว23104",
-    "subjectCode": "ว23104",
-    "subjectName": "การออกแบบและเทคโนโลยี 3",
-    "teacherId": "tch_ภัทราวรรณ_สุวรรณวาปี",
-    "teacherName": "นางสาวภัทราวรรณ สุวรรณวาปี",
-    "roomLocation": "432"
+    "subjectId": "subj_อ23102",
+    "subjectCode": "อ23102",
+    "subjectName": "ภาษาอังกฤษ6",
+    "teacherId": "tch_พรพิมล_ศิริพันธุ์",
+    "teacherName": "นางพรพิมล ศิริพันธุ์",
+    "roomLocation": "124"
   },
   {
     "id": "tt_m3_4_d1_p3",
@@ -7532,12 +7532,12 @@ export const SCHOOL_TIMETABLE: TimetableEntry[] = [
     "periodEnd": 3,
     "classroomId": "m3_4",
     "gradeRoom": "ม.3/4",
-    "subjectId": "subj_อ23102",
-    "subjectCode": "อ23102",
-    "subjectName": "ภาษาอังกฤษ6",
-    "teacherId": "tch_พรพิมล_ศิริพันธุ์",
-    "teacherName": "นางพรพิมล ศิริพันธุ์",
-    "roomLocation": "124"
+    "subjectId": "subj_ว23104",
+    "subjectCode": "ว23104",
+    "subjectName": "การออกแบบและเทคโนโลยี 3",
+    "teacherId": "tch_ภัทราวรรณ_สุวรรณวาปี",
+    "teacherName": "นางสาวภัทราวรรณ สุวรรณวาปี",
+    "roomLocation": "432"
   },
   {
     "id": "tt_m3_4_d1_p4",
