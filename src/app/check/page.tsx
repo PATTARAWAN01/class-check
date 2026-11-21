@@ -266,6 +266,41 @@ export default function StudentCheckPage() {
           }
         }
       }
+
+      // Smart Passive Auto-Sync Fallback for Substitute Teaching
+      // Runs quietly in background during morning hours on weekdays (08:00 - 11:30 ICT)
+      try {
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const currentHour = now.getHours();
+        const isMorningSchoolWindow = dayOfWeek >= 1 && dayOfWeek <= 5 && currentHour >= 8 && currentHour <= 11;
+        const lastSyncKey = "class_check_last_bg_sub_sync";
+        const lastSync = Number(sessionStorage.getItem(lastSyncKey) || "0");
+        const fifteenMinutes = 15 * 60 * 1000;
+
+        if (isMorningSchoolWindow && Date.now() - lastSync > fifteenMinutes) {
+          sessionStorage.setItem(lastSyncKey, Date.now().toString());
+          fetch(`/api/substitute/cron-sync?date=${encodeURIComponent(todayStr)}`, { method: "POST" })
+            .then((res) => res.json())
+            .then((data) => {
+              if (data?.success && (data?.insertedCount > 0 || data?.updatedCount > 0)) {
+                getSubstituteAssignments().then((refreshed) => {
+                  setSubstitutes(refreshed);
+                  const effectiveRoomId = savedRoomId || localSavedRoomId;
+                  if (effectiveRoomId) {
+                    const roomSubs = refreshed.filter(
+                      (s) => s.classroomId === effectiveRoomId && s.date === todayStr
+                    );
+                    if (roomSubs.length > 0) {
+                      setRoomSubstitutesToday(roomSubs);
+                    }
+                  }
+                });
+              }
+            })
+            .catch(() => {});
+        }
+      } catch {}
     }
     init();
   }, []);
