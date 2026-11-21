@@ -526,15 +526,10 @@ export default function StudentCheckPage() {
         return;
       }
 
-      const isDouble = matchedTT.periodEnd > matchedTT.periodStart;
-      setIsDoublePeriod(isDouble);
-      if (isDouble) {
-        setPeriodStart(matchedTT.periodStart);
-        setPeriodEnd(matchedTT.periodEnd);
-      } else {
-        setPeriodStart(periodNum);
-        setPeriodEnd(periodNum);
-      }
+      // Always treat check-in as single-period (periodNum) for precision and fairness to teachers
+      setIsDoublePeriod(false);
+      setPeriodStart(periodNum);
+      setPeriodEnd(periodNum);
 
       // Match subject (matches by code OR id OR name, resilient to spacing and spelling)
       const cleanSubjCode = (matchedTT.subjectCode || "").replace(/\s+/g, "").toUpperCase();
@@ -617,8 +612,9 @@ export default function StudentCheckPage() {
         }
       }
 
-      const periodLabel = isDouble
-        ? `คาบที่ ${matchedTT.periodStart} - ${matchedTT.periodEnd} (วิชาคาบคู่)`
+      const isContinuous = matchedTT.periodEnd > matchedTT.periodStart;
+      const periodLabel = isContinuous
+        ? `คาบที่ ${periodNum} (วิชาเรียนต่อเนื่อง คาบ ${matchedTT.periodStart}-${matchedTT.periodEnd})`
         : `คาบที่ ${periodNum}`;
 
       const subInfo = activeSub
@@ -962,7 +958,8 @@ export default function StudentCheckPage() {
         }
       }
 
-      const periodCount = isDoublePeriod ? periodEnd - periodStart + 1 : 1;
+      // Always save as a single-period (1 period) for individual period precision
+      const periodCount = 1;
       const parsedDate = new Date(checkDate);
       const dayOfWeek = parsedDate.getDay() || 1;
 
@@ -978,7 +975,8 @@ export default function StudentCheckPage() {
           (r) =>
             r.date === checkDate &&
             (r.classroomId === selectedRoomId || r.gradeRoom === room?.gradeRoom) &&
-            !(periodEnd < r.periodStart || periodStart > r.periodEnd)
+            r.periodStart === periodStart &&
+            r.periodEnd === periodStart
         );
         if (existing) {
           recordToUpdate = existing;
@@ -1139,6 +1137,21 @@ export default function StudentCheckPage() {
 
   const currentPeriodSpecialInfo = useMemo(() => {
     return getPeriodSpecialInfo(periodStart);
+  }, [selectedRoomId, currentRoom, currentDayOfWeek, periodStart, timetables]);
+
+  const matchedContinuousTT = useMemo(() => {
+    if (!selectedRoomId || !currentRoom) return null;
+    const tt = timetables.find(
+      (t) =>
+        (t.classroomId === selectedRoomId || t.gradeRoom === currentRoom.gradeRoom) &&
+        t.dayOfWeek === currentDayOfWeek &&
+        periodStart >= t.periodStart &&
+        periodStart <= t.periodEnd
+    );
+    if (tt && tt.periodEnd > tt.periodStart) {
+      return tt;
+    }
+    return null;
   }, [selectedRoomId, currentRoom, currentDayOfWeek, periodStart, timetables]);
 
   return (
@@ -1599,13 +1612,13 @@ export default function StudentCheckPage() {
 
               {/* Period Buttons / Selectors with Morning & Afternoon separation */}
               <div className="space-y-3">
-                {isDoublePeriod && (
-                  <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-300 text-xs text-sky-900 flex items-center gap-2 shadow-xs">
-                    <span className="font-bold bg-sky-700 text-white px-2 py-0.5 rounded-md text-[11px] shrink-0">
-                      ⚡ วิชาคาบคู่
+                {matchedContinuousTT && (
+                  <div className="p-2.5 rounded-xl bg-sky-50 border border-sky-200 text-xs text-sky-900 flex items-center gap-2 shadow-2xs">
+                    <span className="font-bold bg-sky-600 text-white px-2 py-0.5 rounded-md text-[10px] shrink-0">
+                      วิชาเรียนต่อเนื่อง
                     </span>
-                    <span className="font-medium">
-                      ตารางสอนระบุเป็นวิชาคาบคู่ (คาบที่ {periodStart} - {periodEnd}) ระบบเลือกและบันทึกข้อมูลพร้อมกันให้อัตโนมัติ
+                    <span className="font-medium text-slate-700">
+                      (วิชานี้เรียนต่อเนื่อง {matchedContinuousTT.periodEnd - matchedContinuousTT.periodStart + 1} คาบ: คาบที่ {matchedContinuousTT.periodStart} - {matchedContinuousTT.periodEnd} &bull; บันทึกแยกทีละคาบ)
                     </span>
                   </div>
                 )}
@@ -1641,9 +1654,7 @@ export default function StudentCheckPage() {
                           </div>
                         );
                       }
-                      const isSelected = isDoublePeriod
-                        ? p.periodNumber >= periodStart && p.periodNumber <= periodEnd
-                        : p.periodNumber === periodStart;
+                      const isSelected = p.periodNumber === periodStart;
                       const isLogged = isPeriodLogged(p.periodNumber);
                       return (
                         <button
@@ -1720,9 +1731,7 @@ export default function StudentCheckPage() {
                           </div>
                         );
                       }
-                      const isSelected = isDoublePeriod
-                        ? p.periodNumber >= periodStart && p.periodNumber <= periodEnd
-                        : p.periodNumber === periodStart;
+                      const isSelected = p.periodNumber === periodStart;
                       const isLogged = isPeriodLogged(p.periodNumber);
                       return (
                         <button
