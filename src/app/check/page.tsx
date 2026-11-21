@@ -273,12 +273,17 @@ export default function StudentCheckPage() {
         const now = new Date();
         const dayOfWeek = now.getDay();
         const currentHour = now.getHours();
+        const currentMinute = now.getMinutes();
         const isMorningSchoolWindow = dayOfWeek >= 1 && dayOfWeek <= 5 && currentHour >= 8 && currentHour <= 11;
         const lastSyncKey = "class_check_last_bg_sub_sync";
         const lastSync = Number(sessionStorage.getItem(lastSyncKey) || "0");
-        const fifteenMinutes = 15 * 60 * 1000;
+        
+        // Critical prep window before 08:35 AM (08:15 - 08:38 AM):
+        // Re-check every 90 seconds to guarantee fresh substitute assignments before students check Period 1
+        const isCriticalMorningPrep = isMorningSchoolWindow && currentHour === 8 && currentMinute <= 38;
+        const syncInterval = isCriticalMorningPrep ? 90 * 1000 : 15 * 60 * 1000;
 
-        if (isMorningSchoolWindow && Date.now() - lastSync > fifteenMinutes) {
+        if (isMorningSchoolWindow && Date.now() - lastSync > syncInterval) {
           sessionStorage.setItem(lastSyncKey, Date.now().toString());
           fetch(`/api/substitute/cron-sync?date=${encodeURIComponent(todayStr)}`, { method: "POST" })
             .then((res) => res.json())
@@ -614,8 +619,8 @@ export default function StudentCheckPage() {
             s.classroomId === roomId ||
             s.gradeRoom === targetGradeRoom) &&
           s.date === dateStr &&
-          Number(s.periodStart) <= matchedTT.periodStart &&
-          Number(s.periodEnd) >= matchedTT.periodStart
+          ((Number(s.periodStart) <= periodNum && Number(s.periodEnd) >= periodNum) ||
+            (Number(s.periodStart) <= matchedTT.periodStart && Number(s.periodEnd) >= matchedTT.periodStart))
       );
 
       if (activeSub) {
