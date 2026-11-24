@@ -1,4 +1,25 @@
-import { Classroom, Subject, Teacher, TimetableEntry, AcademicTerm } from "@/types";
+import type { Classroom, Subject, Teacher, TimetableEntry, AcademicTerm } from "@/types";
+
+export interface TimetableDiffItem {
+  type: "added" | "modified" | "removed";
+  key: string;
+  gradeRoom: string;
+  dayOfWeek: number;
+  periodStart: number;
+  periodEnd: number;
+  oldEntry?: TimetableEntry;
+  newEntry?: TimetableEntry;
+  changedFields?: string[];
+}
+
+export interface TimetableDiffResult {
+  added: TimetableEntry[];
+  modified: { oldEntry: TimetableEntry; newEntry: TimetableEntry; changedFields: string[] }[];
+  removed: TimetableEntry[];
+  unchangedCount: number;
+  affectedClassrooms: string[];
+  items: TimetableDiffItem[];
+}
 
 export interface ParsedTimetableResult {
   term: AcademicTerm;
@@ -470,33 +491,63 @@ export function parseSchoolTimetableText(
         if (lines.length === 0) continue;
 
         const codeOrAct = lines[0];
-        const isActivityOnly = [
-          "ชุมนุม",
-          "ลูกเสือ",
-          "เลือกเสรี",
-          "ติวโอเน็ต",
-          "ซ่อมเสริม",
-          "บำเพ็ญประโยชน์",
-        ].some((act) => codeOrAct.includes(act));
+        const joinedCell = lines.join(" ").replace(/\s+/g, "");
+        const looksLikeSubjectCode = /^[ก-ฮA-Za-z]\d{4,6}/.test(codeOrAct);
+        const isActivityOnly =
+          !looksLikeSubjectCode &&
+          [
+            "ชุมนุม",
+            "ลูกเสือ",
+            "เนตรนารี",
+            "ยุวกาชาด",
+            "เลือกเสรี",
+            "ติวโอเน็ต",
+            "ซ่อมเสริม",
+            "บำเพ็ญประโยชน์",
+            "พัฒนาทักษะชีวิต",
+            "สวดมนต์",
+            "โฮมรูม",
+            "พักเที่ยง",
+          ].some((act) => joinedCell.includes(act));
 
-        if (isActivityOnly && lines.length === 1) {
+        if (isActivityOnly) {
           continue;
         }
 
         const teacherShort = lines[1] || "";
         const roomLoc = lines[2] || "";
 
+        const resolveFullTeacherName = (candidate: string): string => {
+          const clean = candidate.replace(/^ครู/, "").trim();
+          if (!clean) return "";
+          // If already a full name (contains space) and exists in teachersMap, keep it
+          if (clean.includes(" ") && teachersMap.has(clean)) {
+            return clean;
+          }
+          // Try unique first-name match against known full names in teachersMap
+          const matches = Array.from(teachersMap.keys()).filter(
+            (fName) => fName.includes(" ") && (fName === clean || fName.startsWith(clean + " "))
+          );
+          if (matches.length === 1) {
+            return matches[0];
+          }
+          // Fallback prefix match
+          const prefixMatches = Array.from(teachersMap.keys()).filter(
+            (fName) => fName.includes(" ") && fName.startsWith(clean)
+          );
+          if (prefixMatches.length === 1) {
+            return prefixMatches[0];
+          }
+          return clean;
+        };
+
         let teacherFullName = "";
         if (roomSubjectTeacherMap.has(`${currentClassroom}_${codeOrAct}`)) {
-          teacherFullName = roomSubjectTeacherMap.get(`${currentClassroom}_${codeOrAct}`) || "";
+          teacherFullName = resolveFullTeacherName(
+            roomSubjectTeacherMap.get(`${currentClassroom}_${codeOrAct}`) || ""
+          );
         } else if (teacherShort) {
-          const shortClean = teacherShort.replace(/^ครู/, "").trim();
-          for (const fName of Array.from(teachersMap.keys())) {
-            if (fName.startsWith(shortClean)) {
-              teacherFullName = fName;
-              break;
-            }
-          }
+          teacherFullName = resolveFullTeacherName(teacherShort);
         }
 
         if (!teacherFullName && teacherShort) {
@@ -641,5 +692,137 @@ export function parseSchoolTimetableText(
       totalPeriods: timetableEntries.length,
       termTitle: `ภาคเรียนที่ ${detectedTerm}/${detectedYear}`,
     },
+  };
+}
+
+/**
+ * Compares existing Firestore timetable entries against incoming parsed entries
+ * (scoped ONLY to classrooms present in the incoming file) so that only changed,
+ * added, or removed entries are modified.
+ */
+export function computeTimetableDiff(
+  existingEntries: TimetableEntry[],
+  incomingEntries: TimetableEntry[],
+  importedGradeRooms?: string[]
+): TimetableDiffResult {
+  const norm = (s?: string) => (s || "").replace(/\s+/g, " ").trim();
+  const slotKey = (e: TimetableEntry) =>
+    `${norm(e.gradeRoom)}|${e.dayOfWeek}|${e.periodStart}|${e.periodEnd}`;
+
+  const scopedRooms = new Set<string>(
+    (importedGradeRooms && importedGradeRooms.length > 0
+      ? importedGradeRooms
+      : incomingEntries.map((e) => e.gradeRoom)
+    ).map((r) => norm(r))
+  );
+
+  // Build map of existing entries for scoped classrooms only
+  const existingBySlot = new Map<string, TimetableEntry>();
+  for (const ex of existingEntries) {
+    if (!scopedRooms.has(norm(ex.gradeRoom))) continue;
+    existingBySlot.set(slotKey(ex), ex);
+  }
+
+  const added: TimetableEntry[] = [];
+  const modified: { oldEntry: TimetableEntry; newEntry: TimetableEntry; changedFields: string[] }[] = [];
+  const removed: TimetableEntry[] = [];
+  const items: TimetableDiffItem[] = [];
+  const affectedRoomsSet = new Set<string>();
+  const incomingSlots = new Set<string>();
+  let unchangedCount = 0;
+
+  for (const inc of incomingEntries) {
+    const key = slotKey(inc);
+    incomingSlots.add(key);
+    const ex = existingBySlot.get(key);
+
+    if (!ex) {
+      added.push(inc);
+      affectedRoomsSet.add(inc.gradeRoom);
+      items.push({
+        type: "added",
+        key: `add|${key}`,
+        gradeRoom: inc.gradeRoom,
+        dayOfWeek: inc.dayOfWeek,
+        periodStart: inc.periodStart,
+        periodEnd: inc.periodEnd,
+        newEntry: inc,
+      });
+    } else {
+      const changedFields: string[] = [];
+      if (
+        norm(ex.subjectCode) !== norm(inc.subjectCode) ||
+        norm(ex.subjectName) !== norm(inc.subjectName)
+      ) {
+        changedFields.push("วิชา");
+      }
+      if (norm(ex.teacherName) !== norm(inc.teacherName)) {
+        changedFields.push("ครูผู้สอน");
+      }
+      if (norm(ex.roomLocation) !== norm(inc.roomLocation)) {
+        changedFields.push("ห้องเรียน/สถานที่");
+      }
+
+      if (changedFields.length === 0) {
+        unchangedCount += 1;
+      } else {
+        modified.push({ oldEntry: ex, newEntry: inc, changedFields });
+        affectedRoomsSet.add(inc.gradeRoom);
+        items.push({
+          type: "modified",
+          key: `mod|${key}`,
+          gradeRoom: inc.gradeRoom,
+          dayOfWeek: inc.dayOfWeek,
+          periodStart: inc.periodStart,
+          periodEnd: inc.periodEnd,
+          oldEntry: ex,
+          newEntry: inc,
+          changedFields,
+        });
+      }
+    }
+  }
+
+  for (const [key, ex] of Array.from(existingBySlot.entries())) {
+    if (!incomingSlots.has(key)) {
+      removed.push(ex);
+      affectedRoomsSet.add(ex.gradeRoom);
+      items.push({
+        type: "removed",
+        key: `rem|${key}`,
+        gradeRoom: ex.gradeRoom,
+        dayOfWeek: ex.dayOfWeek,
+        periodStart: ex.periodStart,
+        periodEnd: ex.periodEnd,
+        oldEntry: ex,
+      });
+    }
+  }
+
+  const parseRoomOrder = (gradeRoom: string) => {
+    const m = gradeRoom.match(/(\d+)\/(\d+)/);
+    return m ? Number(m[1]) * 100 + Number(m[2]) : 9999;
+  };
+
+  items.sort((a, b) => {
+    const ra = parseRoomOrder(a.gradeRoom);
+    const rb = parseRoomOrder(b.gradeRoom);
+    if (ra !== rb) return ra - rb;
+    if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+    if (a.periodStart !== b.periodStart) return a.periodStart - b.periodStart;
+    return a.type.localeCompare(b.type);
+  });
+
+  const affectedClassrooms = Array.from(affectedRoomsSet).sort(
+    (a, b) => parseRoomOrder(a) - parseRoomOrder(b)
+  );
+
+  return {
+    added,
+    modified,
+    removed,
+    unchangedCount,
+    affectedClassrooms,
+    items,
   };
 }

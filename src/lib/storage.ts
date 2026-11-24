@@ -517,6 +517,50 @@ export async function replaceTimetableForClassrooms(
   return { saved: entries.length, deleted: deletedCount };
 }
 
+/**
+ * Applies ONLY the changed/added/removed timetable entries to Firestore and localStorage.
+ * Unchanged entries are never rewritten or touched.
+ */
+export async function applyTimetableDiff(params: {
+  toUpsert: TimetableEntry[];
+  toDeleteIds: string[];
+}): Promise<{ upserted: number; deleted: number }> {
+  const { toUpsert, toDeleteIds } = params;
+  const uniqueDeleteIds = Array.from(new Set(toDeleteIds)).filter(Boolean);
+
+  if (db) {
+    for (let i = 0; i < uniqueDeleteIds.length; i += 400) {
+      const chunk = uniqueDeleteIds.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((docId) => {
+        batch.delete(doc(db!, "timetables", docId));
+      });
+      await batch.commit();
+    }
+
+    for (let i = 0; i < toUpsert.length; i += 400) {
+      const chunk = toUpsert.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((tt) => {
+        batch.set(doc(db!, "timetables", tt.id), cleanForFirestore(tt));
+      });
+      await batch.commit();
+    }
+  }
+
+  // Update local storage cache incrementally
+  const deleteSet = new Set(uniqueDeleteIds);
+  const upsertById = new Map(toUpsert.map((e) => [e.id, e]));
+  const existingLocal = getLocal<TimetableEntry[]>(STORAGE_KEYS.TIMETABLE, INITIAL_TIMETABLE);
+  const nextLocal = existingLocal.filter(
+    (e) => !deleteSet.has(e.id) && !upsertById.has(e.id)
+  );
+  nextLocal.push(...toUpsert);
+  setLocal(STORAGE_KEYS.TIMETABLE, nextLocal);
+
+  return { upserted: toUpsert.length, deleted: uniqueDeleteIds.length };
+}
+
 export async function deleteTimetableEntry(id: string): Promise<void> {
   if (db) {
     await deleteDoc(doc(db, "timetables", id));
