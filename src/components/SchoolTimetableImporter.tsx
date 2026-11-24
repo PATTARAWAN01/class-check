@@ -17,11 +17,19 @@ import {
   saveClassroom,
   getTimetable,
   applyTimetableDiff,
+  addTimetableUpdateLog,
   getClassrooms,
   getTeachers,
   getSubjects,
 } from "@/lib/storage";
-import type { AcademicTerm, Classroom, Subject, Teacher, TimetableEntry } from "@/types";
+import type {
+  AcademicTerm,
+  Classroom,
+  Subject,
+  Teacher,
+  TimetableEntry,
+  TimetableChangeItem,
+} from "@/types";
 import {
   FileSpreadsheet,
   Upload,
@@ -105,6 +113,7 @@ export default function SchoolTimetableImporter({
   const [comparing, setComparing] = useState(false);
 
   const [sheetInfo, setSheetInfo] = useState<{ totalSheets: number; fileName: string } | null>(null);
+  const [updateNote, setUpdateNote] = useState("");
   const [importSummaryMsg, setImportSummaryMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [importing, setImporting] = useState(false);
@@ -132,6 +141,7 @@ export default function SchoolTimetableImporter({
     setSelectedDiffKeys(new Set());
     setDiffRoomFilter("all");
     setSheetInfo(null);
+    setUpdateNote("");
     setImportSummaryMsg("");
     setImportSuccess(false);
   };
@@ -459,6 +469,37 @@ export default function SchoolTimetableImporter({
 
       if (toUpsert.length > 0 || toDeleteIds.length > 0) {
         await applyTimetableDiff({ toUpsert, toDeleteIds });
+
+        const changeItems: TimetableChangeItem[] = selectedItems.map((item) => ({
+          type: item.type,
+          gradeRoom: item.gradeRoom,
+          dayOfWeek: item.dayOfWeek,
+          periodStart: item.periodStart,
+          periodEnd: item.periodEnd,
+          oldEntry: item.oldEntry,
+          newEntry: item.newEntry,
+          changedFields: item.changedFields,
+        }));
+        const affectedRooms = Array.from(new Set(selectedItems.map((i) => i.gradeRoom)));
+
+        await addTimetableUpdateLog({
+          id: `ttlog_${Date.now()}_xl`,
+          termId: finalTerm.id,
+          createdAt: new Date().toISOString(),
+          source: "excel_import",
+          sourceLabel: sheetInfo?.fileName
+            ? `นำเข้าไฟล์ ${sheetInfo.fileName}`
+            : "นำเข้าจากข้อความตารางสอน",
+          note: updateNote.trim() || undefined,
+          summary: {
+            added: addCount,
+            modified: modCount,
+            removed: remCount,
+            unchanged: diffResult.unchangedCount,
+            affectedClassrooms: affectedRooms,
+          },
+          changes: changeItems,
+        });
       }
 
       const parts: string[] = [];
@@ -928,6 +969,20 @@ export default function SchoolTimetableImporter({
                             <span>ตั้งให้เป็นภาคเรียนปัจจุบัน (Active Term)</span>
                           </label>
                         </div>
+                      </div>
+
+                      {/* Optional Update Note */}
+                      <div className="space-y-1">
+                        <label className="block text-xs font-bold text-slate-700">
+                          หมายเหตุการอัปเดต (ไม่บังคับ — จะถูกบันทึกไว้ในประวัติการอัปเดตตารางเรียน):
+                        </label>
+                        <input
+                          type="text"
+                          value={updateNote}
+                          onChange={(e) => setUpdateNote(e.target.value)}
+                          placeholder='เช่น "ฝ่ายวิชาการแจ้งปรับตาราง ม.5 ฉบับที่ 2"'
+                          className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                        />
                       </div>
 
                       {/* Safety Notice */}

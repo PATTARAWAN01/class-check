@@ -63,6 +63,9 @@ import {
   getTimetable,
   saveTimetable,
   deleteTimetableEntry,
+  applyTimetableDiff,
+  getTimetableUpdateLogs,
+  addTimetableUpdateLog,
   getSchoolProfile,
   saveSchoolProfile,
   getAttendanceLogs,
@@ -98,6 +101,8 @@ import {
   Classroom,
   PeriodSetting,
   TimetableEntry,
+  TimetableUpdateLog,
+  TimetableChangeItem,
   SchoolProfile,
   AttendanceRecord,
   SubstituteAssignment,
@@ -112,6 +117,7 @@ import ClassroomPinPrintModal from "@/components/ClassroomPinPrintModal";
 import ClassroomPeriodMatrixModal from "@/components/ClassroomPeriodMatrixModal";
 import SubstituteExcelImporter from "@/components/SubstituteExcelImporter";
 import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
+import TimetableManagerPanel from "@/components/TimetableManagerPanel";
 import { generateSecurePin } from "@/lib/pinUtils";
 import { getEffectivePeriodCount, deduplicateAttendanceRecords } from "@/lib/attendanceUtils";
 
@@ -142,6 +148,7 @@ export default function AdminPage() {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [periods, setPeriods] = useState<PeriodSetting[]>([]);
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
+  const [timetableUpdateLogs, setTimetableUpdateLogs] = useState<TimetableUpdateLog[]>([]);
   const [schoolProfile, setSchoolProfile] = useState<SchoolProfile>({
     schoolName: "โรงเรียนหนองวัวซอพิทยาคม",
     logoUrl: "/LOGO-N.png",
@@ -261,6 +268,7 @@ export default function AdminPage() {
       attList,
       subList,
       syncStatus,
+      ttLogs,
     ] = await Promise.all([
       getTerms(),
       getTeachers(),
@@ -272,6 +280,7 @@ export default function AdminPage() {
       getAttendanceLogs(),
       getSubstituteAssignments(),
       getSubstituteSyncStatus(),
+      getTimetableUpdateLogs(),
     ]);
 
     setTerms(termList);
@@ -283,6 +292,7 @@ export default function AdminPage() {
     setSchoolProfile(prof);
     setAttendanceLogs(attList);
     setSubstitutes(subList);
+    setTimetableUpdateLogs(ttLogs);
 
     if (syncStatus) {
       setLastSyncResult({
@@ -1246,10 +1256,66 @@ export default function AdminPage() {
       if (!proceed) return;
     }
 
+    const oldSubject = subjects.find((s) => s.id === editingSubject.id);
     const updated = subjects.map((s) => (s.id === editingSubject.id ? { ...editingSubject, code: cleanCode, name: cleanName } : s));
     await saveSubjects(updated);
     setSubjects(updated);
-    showNotice(`แก้ไขข้อมูลวิชา ${editingSubject.code} ${editingSubject.name} สำเร็จ`);
+
+    // Auto-sync updated subject code / name to matching timetable entries & log history
+    let syncedCount = 0;
+    if (oldSubject && (oldSubject.code !== cleanCode || oldSubject.name !== cleanName)) {
+      const matchingEntries = timetable.filter(
+        (tt) => tt.subjectId === editingSubject.id || tt.subjectCode === oldSubject.code
+      );
+      if (matchingEntries.length > 0) {
+        const updatedEntries: TimetableEntry[] = matchingEntries.map((tt) => ({
+          ...tt,
+          subjectId: editingSubject.id,
+          subjectCode: cleanCode,
+          subjectName: cleanName,
+        }));
+        await applyTimetableDiff({ toUpsert: updatedEntries, toDeleteIds: [] });
+
+        const activeTermObj = terms.find((t) => t.isActive) || terms[0];
+        const changes: TimetableChangeItem[] = matchingEntries.map((oldEntry, idx) => ({
+          type: "modified",
+          gradeRoom: oldEntry.gradeRoom,
+          dayOfWeek: oldEntry.dayOfWeek,
+          periodStart: oldEntry.periodStart,
+          periodEnd: oldEntry.periodEnd,
+          oldEntry,
+          newEntry: updatedEntries[idx],
+          changedFields: ["วิชา"],
+        }));
+        const affectedRooms = Array.from(new Set(matchingEntries.map((m) => m.gradeRoom)));
+        const newLog: TimetableUpdateLog = {
+          id: `ttlog_${Date.now()}_subj`,
+          termId: activeTermObj?.id || matchingEntries[0].termId || "term_2_2569",
+          createdAt: new Date().toISOString(),
+          source: "subject_sync",
+          sourceLabel: `ซิงก์รายวิชา ${oldSubject.code} ${oldSubject.name} → ${cleanCode} ${cleanName}`,
+          summary: {
+            added: 0,
+            modified: updatedEntries.length,
+            removed: 0,
+            affectedClassrooms: affectedRooms,
+          },
+          changes,
+        };
+        await addTimetableUpdateLog(newLog);
+
+        const updatedMap = new Map(updatedEntries.map((u) => [u.id, u]));
+        setTimetable((prev) => prev.map((tt) => updatedMap.get(tt.id) || tt));
+        setTimetableUpdateLogs((prev) => [newLog, ...prev]);
+        syncedCount = updatedEntries.length;
+      }
+    }
+
+    showNotice(
+      syncedCount > 0
+        ? `แก้ไขข้อมูลวิชา ${cleanCode} ${cleanName} สำเร็จ (ซิงก์อัปเดตในตารางสอน ${syncedCount} คาบ)`
+        : `แก้ไขข้อมูลวิชา ${cleanCode} ${cleanName} สำเร็จ`
+    );
     setEditingSubject(null);
   };
 
@@ -3024,114 +3090,19 @@ export default function AdminPage() {
       {/* TAB 2: TIMETABLE MANAGEMENT */}
       {/* ========================================================== */}
       {activeTab === "timetable" && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-5">
-              <div>
-                <h2 className="text-base font-bold text-slate-800">
-                  จัดการตารางสอนประจำภาคเรียน (Timetable)
-                </h2>
-              </div>
-
-              {/* Excel Import & Template Buttons */}
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setShowSchoolImporter(true)}
-                  className="px-4 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>นำเข้าจากโปรแกรมจัดตารางสอน (CSV / Excel)</span>
-                </button>
-
-                <button
-                  onClick={downloadTimetableTemplate}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 border border-slate-200"
-                >
-                  <Download className="w-3.5 h-3.5 text-slate-600" />
-                  <span>เทมเพลต Excel เปล่า</span>
-                </button>
-
-                <label className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer border border-slate-200 transition-all flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5 text-slate-600" />
-                  <span>นำเข้าไฟล์ Excel</span>
-                  <input
-                    type="file"
-                    accept=".xlsx, .xls"
-                    onChange={handleTimetableImport}
-                    className="sr-only"
-                  />
-                </label>
-              </div>
-            </div>
-
-            {/* Timetable List Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
-                  <tr>
-                    <th className="py-3 px-3">วัน</th>
-                    <th className="py-3 px-3 text-center">คาบเรียน</th>
-                    <th className="py-3 px-3">ห้องเรียน</th>
-                    <th className="py-3 px-3">รหัสวิชา & วิชา</th>
-                    <th className="py-3 px-3">ครูผู้สอน</th>
-                    <th className="py-3 px-3 text-center">จัดการ</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {timetable.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="text-center py-8 text-slate-400">
-                        ยังไม่มีข้อมูลตารางสอน กรุณานำเข้าจากไฟล์ Excel ด้านบน
-                      </td>
-                    </tr>
-                  ) : (
-                    timetable.map((tt) => {
-                      const dayObj = THAI_DAYS.find((d) => d.id === tt.dayOfWeek);
-                      return (
-                        <tr key={tt.id} className="hover:bg-slate-50">
-                          <td className="py-3 px-3 font-semibold text-slate-800">
-                            {dayObj?.full || `วัน${tt.dayOfWeek}`}
-                          </td>
-                          <td className="py-3 px-3 text-center font-mono">
-                            {tt.periodStart === tt.periodEnd
-                              ? `คาบ ${tt.periodStart}`
-                              : `คาบคู่ ${tt.periodStart}-${tt.periodEnd}`}
-                          </td>
-                          <td className="py-3 px-3 font-medium text-sky-700">
-                            ห้อง {tt.gradeRoom}
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className="font-semibold">{tt.subjectCode}</span>{" "}
-                            {tt.subjectName}
-                          </td>
-                          <td className="py-3 px-3 font-medium text-slate-800">
-                            {tt.teacherName}
-                          </td>
-                          <td className="py-3 px-3 text-center">
-                            <button
-                              onClick={async () => {
-                                if (confirm("ต้องการลบคาบสอนนี้ออกจากตารางหรือไม่?")) {
-                                  await deleteTimetableEntry(tt.id);
-                                  setTimetable(timetable.filter((t) => t.id !== tt.id));
-                                  showNotice("ลบรายการตารางสอนแล้ว");
-                                }
-                              }}
-                              className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                              title="ลบ"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <TimetableManagerPanel
+          timetable={timetable}
+          classrooms={classrooms}
+          subjects={subjects}
+          teachers={teachers}
+          activeTerm={terms.find((t) => t.isActive) || terms[0] || null}
+          updateLogs={timetableUpdateLogs}
+          onOpenSchoolImporter={() => setShowSchoolImporter(true)}
+          onDownloadTemplate={downloadTimetableTemplate}
+          onImportExcelTemplate={handleTimetableImport}
+          onRefresh={loadAllData}
+          showNotice={showNotice}
+        />
       )}
 
       {/* ========================================================== */}

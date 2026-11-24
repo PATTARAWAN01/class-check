@@ -8,6 +8,8 @@ import {
   AttendanceRecord,
   SchoolProfile,
   SubstituteAssignment,
+  TimetableUpdateLog,
+  TimetableChangeItem,
 } from "@/types";
 import { db, isFirebaseConfigured } from "./firebase";
 import {
@@ -49,6 +51,7 @@ const STORAGE_KEYS = {
   PROFILE: "class_check_profile",
   SUBSTITUTES: "class_check_substitutes",
   DEPT_PINS: "class_check_dept_pins",
+  TIMETABLE_UPDATE_LOGS: "class_check_timetable_update_logs",
 };
 
 // Event emitter for local storage reactive updates
@@ -559,6 +562,161 @@ export async function applyTimetableDiff(params: {
   setLocal(STORAGE_KEYS.TIMETABLE, nextLocal);
 
   return { upserted: toUpsert.length, deleted: uniqueDeleteIds.length };
+}
+
+// Recursively remove undefined fields so nested Firestore documents never fail
+function deepCleanForFirestore(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map((item) => deepCleanForFirestore(item));
+  }
+  if (value !== null && typeof value === "object") {
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v !== undefined) {
+        cleaned[k] = deepCleanForFirestore(v);
+      }
+    }
+    return cleaned;
+  }
+  return value;
+}
+
+// ==================== 6B. TIMETABLE UPDATE HISTORY & ROLLBACK ====================
+
+export async function getTimetableUpdateLogs(): Promise<TimetableUpdateLog[]> {
+  if (db) {
+    try {
+      const q = query(
+        collection(db, "timetable_update_logs"),
+        orderBy("createdAt", "desc")
+      );
+      const snapshot = await getDocs(q);
+      const list = snapshot.docs.map((d) => ({
+        ...(d.data() as TimetableUpdateLog),
+        id: d.id,
+      }));
+      setLocal(STORAGE_KEYS.TIMETABLE_UPDATE_LOGS, list);
+      return list;
+    } catch (e) {
+      console.warn("getTimetableUpdateLogs error:", e);
+    }
+  }
+  const local = getLocal<TimetableUpdateLog[]>(STORAGE_KEYS.TIMETABLE_UPDATE_LOGS, []);
+  return [...local].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+export async function addTimetableUpdateLog(log: TimetableUpdateLog): Promise<void> {
+  const cleanLog = deepCleanForFirestore(log) as TimetableUpdateLog;
+  if (db) {
+    try {
+      await setDoc(doc(db, "timetable_update_logs", cleanLog.id), cleanLog);
+    } catch (e) {
+      console.error("Firestore addTimetableUpdateLog error:", e);
+    }
+  }
+  const current = getLocal<TimetableUpdateLog[]>(STORAGE_KEYS.TIMETABLE_UPDATE_LOGS, []);
+  const next = [cleanLog, ...current.filter((l) => l.id !== cleanLog.id)];
+  setLocal(STORAGE_KEYS.TIMETABLE_UPDATE_LOGS, next);
+}
+
+export async function rollbackTimetableUpdateLog(
+  log: TimetableUpdateLog
+): Promise<{ restored: number; deleted: number; rollbackLog: TimetableUpdateLog }> {
+  const toUpsert: TimetableEntry[] = [];
+  const toDeleteIds: string[] = [];
+  const inverseChanges: TimetableChangeItem[] = [];
+  const affectedRooms = new Set<string>();
+
+  let addedBack = 0;
+  let modifiedBack = 0;
+  let removedBack = 0;
+
+  for (const ch of log.changes || []) {
+    affectedRooms.add(ch.gradeRoom);
+    if (ch.type === "added" && ch.newEntry) {
+      // Undo an addition by deleting the added entry
+      toDeleteIds.push(ch.newEntry.id);
+      removedBack += 1;
+      inverseChanges.push({
+        type: "removed",
+        gradeRoom: ch.gradeRoom,
+        dayOfWeek: ch.dayOfWeek,
+        periodStart: ch.periodStart,
+        periodEnd: ch.periodEnd,
+        oldEntry: ch.newEntry,
+      });
+    } else if (ch.type === "removed" && ch.oldEntry) {
+      // Undo a deletion by restoring the old entry
+      toUpsert.push(ch.oldEntry);
+      addedBack += 1;
+      inverseChanges.push({
+        type: "added",
+        gradeRoom: ch.gradeRoom,
+        dayOfWeek: ch.dayOfWeek,
+        periodStart: ch.periodStart,
+        periodEnd: ch.periodEnd,
+        newEntry: ch.oldEntry,
+      });
+    } else if (ch.type === "modified" && ch.oldEntry) {
+      // Undo a modification by restoring the old entry (and deleting newEntry.id if ID changed)
+      toUpsert.push(ch.oldEntry);
+      if (ch.newEntry && ch.newEntry.id !== ch.oldEntry.id) {
+        toDeleteIds.push(ch.newEntry.id);
+      }
+      modifiedBack += 1;
+      inverseChanges.push({
+        type: "modified",
+        gradeRoom: ch.gradeRoom,
+        dayOfWeek: ch.dayOfWeek,
+        periodStart: ch.periodStart,
+        periodEnd: ch.periodEnd,
+        oldEntry: ch.newEntry,
+        newEntry: ch.oldEntry,
+        changedFields: ch.changedFields,
+      });
+    }
+  }
+
+  const { upserted, deleted } = await applyTimetableDiff({ toUpsert, toDeleteIds });
+
+  const nowIso = new Date().toISOString();
+
+  // Mark original log as rolled back so it cannot be accidentally rolled back twice
+  const updatedOriginal: TimetableUpdateLog = deepCleanForFirestore({
+    ...log,
+    rolledBackAt: nowIso,
+  });
+  if (db) {
+    try {
+      await setDoc(doc(db, "timetable_update_logs", updatedOriginal.id), updatedOriginal);
+    } catch (e) {
+      console.error("Failed to mark log as rolled back:", e);
+    }
+  }
+  const existingLogs = getLocal<TimetableUpdateLog[]>(STORAGE_KEYS.TIMETABLE_UPDATE_LOGS, []);
+  const markedLogs = existingLogs.map((l) => (l.id === updatedOriginal.id ? updatedOriginal : l));
+  setLocal(STORAGE_KEYS.TIMETABLE_UPDATE_LOGS, markedLogs);
+
+  // Record a new audit log entry for the rollback action itself
+  const rollbackLog: TimetableUpdateLog = {
+    id: `ttlog_${Date.now()}_rb`,
+    termId: log.termId,
+    createdAt: nowIso,
+    source: "rollback",
+    sourceLabel: `ย้อนกลับรายการ: ${log.sourceLabel}`,
+    note: log.note ? `ย้อนกลับจากรอบ "${log.note}"` : undefined,
+    summary: {
+      added: addedBack,
+      modified: modifiedBack,
+      removed: removedBack,
+      affectedClassrooms: Array.from(affectedRooms),
+    },
+    changes: inverseChanges,
+    rolledBackFromLogId: log.id,
+  };
+  await addTimetableUpdateLog(rollbackLog);
+
+  return { restored: upserted, deleted, rollbackLog };
 }
 
 export async function deleteTimetableEntry(id: string): Promise<void> {

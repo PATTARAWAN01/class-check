@@ -143,3 +143,41 @@ export interface SchoolProfile {
   signers: Signer[]; // ผู้ลงนามกำหนดได้กี่คนก็ได้
   updatedAt: string;
 }
+
+export type TimetableUpdateSource =
+  | "excel_import"
+  | "manual_add"
+  | "manual_edit"
+  | "manual_delete"
+  | "subject_sync"
+  | "rollback";
+
+export interface TimetableChangeItem {
+  type: "added" | "modified" | "removed";
+  gradeRoom: string;
+  dayOfWeek: number;
+  periodStart: number;
+  periodEnd: number;
+  oldEntry?: TimetableEntry;
+  newEntry?: TimetableEntry;
+  changedFields?: string[];
+}
+
+export interface TimetableUpdateLog {
+  id: string;
+  termId: string;
+  createdAt: string;
+  source: TimetableUpdateSource;
+  sourceLabel: string;
+  note?: string;
+  summary: {
+    added: number;
+    modified: number;
+    removed: number;
+    unchanged?: number;
+    affectedClassrooms: string[];
+  };
+  changes: TimetableChangeItem[];
+  rolledBackAt?: string;
+  rolledBackFromLogId?: string;
+}
