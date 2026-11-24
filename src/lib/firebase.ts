@@ -16,7 +16,11 @@ export const isFirebaseConfigured = Boolean(
 
 let db: Firestore | null = null;
 
-if (typeof window !== "undefined" && isFirebaseConfigured) {
+// Initialize Firebase for BOTH browser and server (API routes/cron jobs)
+// Previously was guarded by typeof window !== "undefined" which prevented
+// server-side API routes from writing to Firestore (cron-sync would appear to
+// succeed but data was never actually saved)
+if (isFirebaseConfigured) {
   try {
     const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     db = initializeFirestore(app, {
