@@ -66,6 +66,7 @@ import {
   applyTimetableDiff,
   getTimetableUpdateLogs,
   addTimetableUpdateLog,
+  getSchoolHolidays,
   getSchoolProfile,
   saveSchoolProfile,
   getAttendanceLogs,
@@ -103,6 +104,7 @@ import {
   TimetableEntry,
   TimetableUpdateLog,
   TimetableChangeItem,
+  SchoolHoliday,
   SchoolProfile,
   AttendanceRecord,
   SubstituteAssignment,
@@ -118,6 +120,8 @@ import ClassroomPeriodMatrixModal from "@/components/ClassroomPeriodMatrixModal"
 import SubstituteExcelImporter from "@/components/SubstituteExcelImporter";
 import SchoolTimetableImporter from "@/components/SchoolTimetableImporter";
 import TimetableManagerPanel from "@/components/TimetableManagerPanel";
+import MissingCheckinMonitor from "@/components/MissingCheckinMonitor";
+import HolidaysAndBackupPanel from "@/components/HolidaysAndBackupPanel";
 import { generateSecurePin } from "@/lib/pinUtils";
 import { getEffectivePeriodCount, deduplicateAttendanceRecords } from "@/lib/attendanceUtils";
 
@@ -149,6 +153,7 @@ export default function AdminPage() {
   const [periods, setPeriods] = useState<PeriodSetting[]>([]);
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [timetableUpdateLogs, setTimetableUpdateLogs] = useState<TimetableUpdateLog[]>([]);
+  const [holidays, setHolidays] = useState<SchoolHoliday[]>([]);
   const [schoolProfile, setSchoolProfile] = useState<SchoolProfile>({
     schoolName: "โรงเรียนหนองวัวซอพิทยาคม",
     logoUrl: "/LOGO-N.png",
@@ -269,6 +274,7 @@ export default function AdminPage() {
       subList,
       syncStatus,
       ttLogs,
+      holidayList,
     ] = await Promise.all([
       getTerms(),
       getTeachers(),
@@ -281,6 +287,7 @@ export default function AdminPage() {
       getSubstituteAssignments(),
       getSubstituteSyncStatus(),
       getTimetableUpdateLogs(),
+      getSchoolHolidays(),
     ]);
 
     setTerms(termList);
@@ -293,6 +300,7 @@ export default function AdminPage() {
     setAttendanceLogs(attList);
     setSubstitutes(subList);
     setTimetableUpdateLogs(ttLogs);
+    setHolidays(holidayList);
 
     if (syncStatus) {
       setLastSyncResult({
@@ -2145,6 +2153,17 @@ export default function AdminPage() {
       {/* ========================================================== */}
       {activeTab === "attendance" && (
         <div className="space-y-6">
+          {/* Missing Check-in Daily Monitor & LINE Alert */}
+          <MissingCheckinMonitor
+            classrooms={classrooms}
+            timetable={timetable}
+            attendanceLogs={attendanceLogs}
+            holidays={holidays}
+            periods={periods}
+            schoolProfile={schoolProfile}
+            showNotice={showNotice}
+          />
+
           {/* Main Card Header */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-5">
@@ -4485,6 +4504,14 @@ export default function AdminPage() {
       {/* ========================================================== */}
       {activeTab === "settings" && (
         <div className="space-y-6">
+          {/* Tracking Start Date, School Holidays & Full Backup/Restore JSON */}
+          <HolidaysAndBackupPanel
+            holidays={holidays}
+            schoolProfile={schoolProfile}
+            onRefresh={loadAllData}
+            showNotice={showNotice}
+          />
+
           {/* Section: Academic Terms */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <div className="border-b border-slate-100 pb-3 mb-4">

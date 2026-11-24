@@ -30,12 +30,14 @@ import {
   getSubstituteAssignments,
   subscribeSubstituteAssignments,
   getTimetable,
+  getSchoolHolidays,
 } from "@/lib/storage";
 import { exportAttendanceToExcel } from "@/lib/excel";
-import { AcademicTerm, Classroom, Teacher, AttendanceRecord, SchoolProfile, SubstituteAssignment, SubstituteLeaveType, TimetableEntry } from "@/types";
+import { AcademicTerm, Classroom, Teacher, AttendanceRecord, SchoolProfile, SubstituteAssignment, SubstituteLeaveType, TimetableEntry, SchoolHoliday } from "@/types";
 import { DEPARTMENTS } from "@/lib/constants";
 import { getThaiDateString, getThaiOffsetDate, formatThaiDateLong } from "@/lib/dateUtils";
 import { getEffectivePeriodCount, deduplicateAttendanceRecords, getSpecialNonCheckedPeriodInfo } from "@/lib/attendanceUtils";
+import { isDateFullHoliday } from "@/lib/missingCheckinUtils";
 import ClassroomPeriodMatrixModal from "@/components/ClassroomPeriodMatrixModal";
 
 
@@ -47,6 +49,7 @@ export default function StatisticsPage() {
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [allAttendance, setAllAttendance] = useState<AttendanceRecord[]>([]);
   const [substitutes, setSubstitutes] = useState<SubstituteAssignment[]>([]);
+  const [holidays, setHolidays] = useState<SchoolHoliday[]>([]);
   const [schoolProfile, setSchoolProfile] = useState<SchoolProfile | null>(null);
 
   // Embedded Matrix State (above teacher search)
@@ -83,13 +86,14 @@ export default function StatisticsPage() {
   // Load Initial Data
   useEffect(() => {
     async function init() {
-      const [termList, tchList, prof, subList, ttList, clsList] = await Promise.all([
+      const [termList, tchList, prof, subList, ttList, clsList, holList] = await Promise.all([
         getTerms(),
         getTeachers(),
         getSchoolProfile(),
         getSubstituteAssignments(),
         getTimetable(),
         getClassrooms(),
+        getSchoolHolidays(),
       ]);
       setTerms(termList);
       setTeachers(tchList);
@@ -97,6 +101,7 @@ export default function StatisticsPage() {
       setSubstitutes(subList);
       setTimetable(ttList);
       setClassrooms(clsList);
+      setHolidays(holList);
 
       const active = termList.find((t) => t.isActive) || termList[0];
       if (active) setSelectedTermId(active.id);
@@ -669,6 +674,25 @@ export default function StatisticsPage() {
             </button>
           </div>
         </div>
+
+        {/* Holiday Notice on Selected Matrix Date */}
+        {(() => {
+          const fullHol = isDateFullHoliday(holidays, matrixDate);
+          const partialHols = holidays.filter((h) => h.date === matrixDate && h.scope === "periods");
+          if (!fullHol && partialHols.length === 0) return null;
+          return (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                {fullHol
+                  ? `วันที่เลือกเป็นวันหยุด / งดการเรียนการสอนทั้งวัน: ${fullHol.title}`
+                  : `วันที่มีการงดการสอนบางคาบ: ${partialHols
+                      .map((h) => `${h.title} (คาบ ${(h.periods || []).join(", ")})`)
+                      .join(" • ")}`}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Quick Stats Pills */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">

@@ -141,7 +141,53 @@ export interface SchoolProfile {
   directorName?: string;
   academicHeadName?: string;
   signers: Signer[]; // ผู้ลงนามกำหนดได้กี่คนก็ได้
+  trackingStartDate?: string; // YYYY-MM-DD วันเริ่มนับคาบค้างเช็คของเทอม
+  lastBackupAt?: string; // ISO timestamp ของการสำรองข้อมูลล่าสุด
   updatedAt: string;
+}
+
+export type SchoolHolidayScope = "all_day" | "periods";
+
+export interface SchoolHoliday {
+  id: string;
+  date: string; // YYYY-MM-DD
+  title: string; // เช่น "วันพ่อแห่งชาติ", "วันกีฬาสี", "สอบกลางภาค"
+  scope: SchoolHolidayScope;
+  periods?: number[]; // ใช้เมื่อ scope === "periods" เช่น [5, 6, 7]
+  note?: string;
+  createdAt: string;
+}
+
+export type BackupSectionKey =
+  | "terms"
+  | "classrooms"
+  | "teachers"
+  | "subjects"
+  | "periods"
+  | "timetable"
+  | "attendance"
+  | "substitutes"
+  | "timetableUpdateLogs"
+  | "holidays"
+  | "schoolProfile";
+
+export interface SystemBackupPayload {
+  version: string;
+  exportedAt: string;
+  schoolName: string;
+  data: {
+    terms?: AcademicTerm[];
+    classrooms?: Classroom[];
+    teachers?: Teacher[];
+    subjects?: Subject[];
+    periods?: PeriodSetting[];
+    timetable?: TimetableEntry[];
+    attendance?: AttendanceRecord[];
+    substitutes?: SubstituteAssignment[];
+    timetableUpdateLogs?: TimetableUpdateLog[];
+    holidays?: SchoolHoliday[];
+    schoolProfile?: SchoolProfile;
+  };
 }
 
 export type TimetableUpdateSource =

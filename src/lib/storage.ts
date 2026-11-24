@@ -10,6 +10,9 @@ import {
   SubstituteAssignment,
   TimetableUpdateLog,
   TimetableChangeItem,
+  SchoolHoliday,
+  BackupSectionKey,
+  SystemBackupPayload,
 } from "@/types";
 import { db, isFirebaseConfigured } from "./firebase";
 import {
@@ -52,6 +55,7 @@ const STORAGE_KEYS = {
   SUBSTITUTES: "class_check_substitutes",
   DEPT_PINS: "class_check_dept_pins",
   TIMETABLE_UPDATE_LOGS: "class_check_timetable_update_logs",
+  HOLIDAYS: "class_check_holidays",
 };
 
 // Event emitter for local storage reactive updates
@@ -717,6 +721,216 @@ export async function rollbackTimetableUpdateLog(
   await addTimetableUpdateLog(rollbackLog);
 
   return { restored: upserted, deleted, rollbackLog };
+}
+
+// ==================== 6C. SCHOOL HOLIDAYS / NON-TEACHING DAYS ====================
+
+export async function getSchoolHolidays(): Promise<SchoolHoliday[]> {
+  if (db) {
+    try {
+      const q = query(collection(db, "school_holidays"), orderBy("date", "asc"));
+      const snapshot = await getDocs(q);
+      const list = snapshot.docs.map((d) => ({
+        ...(d.data() as SchoolHoliday),
+        id: d.id,
+      }));
+      setLocal(STORAGE_KEYS.HOLIDAYS, list);
+      return list;
+    } catch (e) {
+      console.warn("getSchoolHolidays error:", e);
+    }
+  }
+  const local = getLocal<SchoolHoliday[]>(STORAGE_KEYS.HOLIDAYS, []);
+  return [...local].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+}
+
+export async function saveSchoolHoliday(holiday: SchoolHoliday): Promise<void> {
+  const clean = deepCleanForFirestore(holiday) as SchoolHoliday;
+  if (db) {
+    try {
+      await setDoc(doc(db, "school_holidays", clean.id), clean);
+    } catch (e) {
+      console.error("Firestore saveSchoolHoliday error:", e);
+    }
+  }
+  const list = getLocal<SchoolHoliday[]>(STORAGE_KEYS.HOLIDAYS, []);
+  const next = [...list.filter((h) => h.id !== clean.id), clean].sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
+  setLocal(STORAGE_KEYS.HOLIDAYS, next);
+}
+
+export async function saveSchoolHolidays(holidays: SchoolHoliday[]): Promise<void> {
+  const cleaned = holidays.map((h) => deepCleanForFirestore(h) as SchoolHoliday);
+  if (db) {
+    for (let i = 0; i < cleaned.length; i += 400) {
+      const chunk = cleaned.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((h) => {
+        batch.set(doc(db!, "school_holidays", h.id), h);
+      });
+      await batch.commit();
+    }
+  }
+  const current = getLocal<SchoolHoliday[]>(STORAGE_KEYS.HOLIDAYS, []);
+  const map = new Map<string, SchoolHoliday>();
+  current.forEach((h) => map.set(h.id, h));
+  cleaned.forEach((h) => map.set(h.id, h));
+  setLocal(
+    STORAGE_KEYS.HOLIDAYS,
+    Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date))
+  );
+}
+
+export async function deleteSchoolHoliday(id: string): Promise<void> {
+  if (db) {
+    try {
+      await deleteDoc(doc(db, "school_holidays", id));
+    } catch (e) {
+      console.error("Firestore deleteSchoolHoliday error:", e);
+    }
+  }
+  const list = getLocal<SchoolHoliday[]>(STORAGE_KEYS.HOLIDAYS, []).filter((h) => h.id !== id);
+  setLocal(STORAGE_KEYS.HOLIDAYS, list);
+}
+
+// ==================== 6D. FULL BACKUP & SELECTIVE RESTORE (JSON) ====================
+
+async function batchWriteCollection<T extends { id: string }>(
+  collectionName: string,
+  items: T[]
+): Promise<number> {
+  if (!items || items.length === 0) return 0;
+  if (db) {
+    for (let i = 0; i < items.length; i += 400) {
+      const chunk = items.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((item) => {
+        batch.set(doc(db!, collectionName, item.id), deepCleanForFirestore(item));
+      });
+      await batch.commit();
+    }
+  }
+  return items.length;
+}
+
+export async function exportFullSystemBackup(): Promise<SystemBackupPayload> {
+  const [
+    terms,
+    classrooms,
+    teachers,
+    subjects,
+    periods,
+    timetable,
+    attendance,
+    substitutes,
+    timetableUpdateLogs,
+    holidays,
+    schoolProfile,
+  ] = await Promise.all([
+    getTerms(),
+    getClassrooms(),
+    getTeachers(),
+    getSubjects(),
+    getPeriodSettings(),
+    getTimetable(),
+    getAttendanceLogs(),
+    getSubstituteAssignments(),
+    getTimetableUpdateLogs(),
+    getSchoolHolidays(),
+    getSchoolProfile(),
+  ]);
+
+  const exportedAt = new Date().toISOString();
+
+  // Save lastBackupAt timestamp to schoolProfile
+  try {
+    await saveSchoolProfile({
+      ...schoolProfile,
+      lastBackupAt: exportedAt,
+      updatedAt: exportedAt,
+    });
+  } catch (e) {
+    console.warn("Could not update lastBackupAt:", e);
+  }
+
+  return {
+    version: "1.0",
+    exportedAt,
+    schoolName: schoolProfile?.schoolName || "โรงเรียนหนองวัวซอพิทยาคม",
+    data: {
+      terms,
+      classrooms,
+      teachers,
+      subjects,
+      periods,
+      timetable,
+      attendance,
+      substitutes,
+      timetableUpdateLogs,
+      holidays,
+      schoolProfile: { ...schoolProfile, lastBackupAt: exportedAt },
+    },
+  };
+}
+
+export async function restoreSystemBackup(
+  payload: SystemBackupPayload,
+  selectedSections: BackupSectionKey[]
+): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  const d = payload?.data || {};
+  const want = new Set<BackupSectionKey>(selectedSections);
+
+  if (want.has("terms") && Array.isArray(d.terms)) {
+    counts.terms = await batchWriteCollection("academic_terms", d.terms);
+    setLocal(STORAGE_KEYS.TERMS, d.terms);
+  }
+  if (want.has("classrooms") && Array.isArray(d.classrooms)) {
+    counts.classrooms = await batchWriteCollection("classrooms", d.classrooms);
+    setLocal(STORAGE_KEYS.CLASSROOMS, d.classrooms);
+  }
+  if (want.has("teachers") && Array.isArray(d.teachers)) {
+    counts.teachers = await batchWriteCollection("teachers", d.teachers);
+    setLocal(STORAGE_KEYS.TEACHERS, d.teachers);
+  }
+  if (want.has("subjects") && Array.isArray(d.subjects)) {
+    counts.subjects = await batchWriteCollection("subjects", d.subjects);
+    setLocal(STORAGE_KEYS.SUBJECTS, d.subjects);
+  }
+  if (want.has("periods") && Array.isArray(d.periods)) {
+    await savePeriodSettings(d.periods);
+    counts.periods = d.periods.length;
+  }
+  if (want.has("timetable") && Array.isArray(d.timetable)) {
+    counts.timetable = await batchWriteCollection("timetables", d.timetable);
+    setLocal(STORAGE_KEYS.TIMETABLE, d.timetable);
+  }
+  if (want.has("attendance") && Array.isArray(d.attendance)) {
+    counts.attendance = await batchWriteCollection("attendance_logs", d.attendance);
+    setLocal(STORAGE_KEYS.ATTENDANCE, d.attendance);
+  }
+  if (want.has("substitutes") && Array.isArray(d.substitutes)) {
+    counts.substitutes = await batchWriteCollection("substitute_assignments", d.substitutes);
+    setLocal(STORAGE_KEYS.SUBSTITUTES, d.substitutes);
+  }
+  if (want.has("timetableUpdateLogs") && Array.isArray(d.timetableUpdateLogs)) {
+    counts.timetableUpdateLogs = await batchWriteCollection(
+      "timetable_update_logs",
+      d.timetableUpdateLogs
+    );
+    setLocal(STORAGE_KEYS.TIMETABLE_UPDATE_LOGS, d.timetableUpdateLogs);
+  }
+  if (want.has("holidays") && Array.isArray(d.holidays)) {
+    counts.holidays = await batchWriteCollection("school_holidays", d.holidays);
+    setLocal(STORAGE_KEYS.HOLIDAYS, d.holidays);
+  }
+  if (want.has("schoolProfile") && d.schoolProfile) {
+    await saveSchoolProfile(d.schoolProfile);
+    counts.schoolProfile = 1;
+  }
+
+  return counts;
 }
 
 export async function deleteTimetableEntry(id: string): Promise<void> {

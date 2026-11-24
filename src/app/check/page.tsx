@@ -22,6 +22,8 @@ import {
   Edit3,
   RotateCcw,
   Trash2,
+  CalendarOff,
+  X,
 } from "lucide-react";
 import {
   getClassrooms,
@@ -37,6 +39,8 @@ import {
   subscribeAttendance,
   getSubstituteAssignments,
   subscribeSubstituteAssignments,
+  getSchoolHolidays,
+  getSchoolProfile,
 } from "@/lib/storage";
 import {
   Classroom,
@@ -49,6 +53,8 @@ import {
   AbsenceReason,
   AttendanceRecord,
   SubstituteAssignment,
+  SchoolHoliday,
+  SchoolProfile,
 } from "@/types";
 import { THAI_DAYS } from "@/lib/constants";
 import { INITIAL_SUBJECTS } from "@/lib/initialData";
@@ -56,9 +62,13 @@ import {
   getThaiDateString,
   getThaiOffsetDate,
   formatThaiDateLong,
-  isWithin7DaysThai,
+  formatThaiDateShort,
 } from "@/lib/dateUtils";
 import { getSpecialNonCheckedPeriodInfo } from "@/lib/attendanceUtils";
+import {
+  getHolidayForDatePeriod,
+  computeRoomMissingHistory,
+} from "@/lib/missingCheckinUtils";
 
 // Excluded non-academic activities, free periods, or tutorial periods that should NOT be checked:
 const EXCLUDED_ACTIVITY_KEYWORDS = [
@@ -97,6 +107,11 @@ export default function StudentCheckPage() {
   const [substitutes, setSubstitutes] = useState<SubstituteAssignment[]>([]);
   const [roomSubstitutesToday, setRoomSubstitutesToday] = useState<SubstituteAssignment[]>([]);
   const [showSubstituteModal, setShowSubstituteModal] = useState(false);
+  const [holidays, setHolidays] = useState<SchoolHoliday[]>([]);
+  const [schoolProfile, setSchoolProfile] = useState<SchoolProfile | null>(null);
+  const [hasLoadedRoomLogs, setHasLoadedRoomLogs] = useState(false);
+  const [showMissingModal, setShowMissingModal] = useState(false);
+  const [hasAutoShownMissingPopup, setHasAutoShownMissingPopup] = useState(false);
 
   // Room Authentication state
   const [selectedGrade, setSelectedGrade] = useState("");
@@ -166,13 +181,15 @@ export default function StudentCheckPage() {
   // Load all required data
   useEffect(() => {
     async function init() {
-      const [term, clsList, pList, tchList, subjList, subList] = await Promise.all([
+      const [term, clsList, pList, tchList, subjList, subList, holidayList, prof] = await Promise.all([
         getActiveTerm(),
         getClassrooms(),
         getPeriodSettings(),
         getTeachers(),
         getSubjects(),
         getSubstituteAssignments(),
+        getSchoolHolidays(),
+        getSchoolProfile(),
       ]);
       setActiveTerm(term);
       setClassrooms(clsList);
@@ -180,6 +197,8 @@ export default function StudentCheckPage() {
       setTeachers(tchList);
       setSubjects(subjList);
       setSubstitutes(subList);
+      setHolidays(holidayList);
+      setSchoolProfile(prof);
 
       let ttList: TimetableEntry[] = [];
       if (term) {
@@ -335,34 +354,105 @@ export default function StudentCheckPage() {
   useEffect(() => {
     if (isRoomAuthenticated && selectedRoomId) {
       const unsubscribe = subscribeAttendance((allRecords) => {
-        const roomLogs = allRecords.filter((l) => l.classroomId === selectedRoomId);
+        const roomLogs = allRecords.filter(
+          (l) =>
+            l.classroomId === selectedRoomId &&
+            (!activeTerm || !l.termId || l.termId === activeTerm.id)
+        );
         setAllRoomLogs(roomLogs);
+        setHasLoadedRoomLogs(true);
         const todayLogs = roomLogs.filter((l) => l.date === checkDate);
         setRoomTodayLogs(todayLogs);
       });
       return () => unsubscribe();
+    } else {
+      setHasLoadedRoomLogs(false);
+      setHasAutoShownMissingPopup(false);
+      setShowMissingModal(false);
     }
-  }, [isRoomAuthenticated, selectedRoomId, checkDate]);
+  }, [isRoomAuthenticated, selectedRoomId, checkDate, activeTerm]);
 
   async function loadRoomLogs() {
     if (!activeTerm) return;
     const allLogs = await getAttendanceLogs(activeTerm.id);
     const roomLogs = allLogs.filter((l) => l.classroomId === selectedRoomId);
     setAllRoomLogs(roomLogs);
+    setHasLoadedRoomLogs(true);
     setRoomTodayLogs(roomLogs.filter((l) => l.date === checkDate));
   }
 
-  // Room logs within 7 days that are eligible for editing/deleting
-  const room7DaysLogs = useMemo(() => {
-    return allRoomLogs.filter((l) => isWithin7DaysThai(l.date));
+  // Holiday check for currently selected date & period (locks submit 100%)
+  const currentPeriodHoliday = useMemo(() => {
+    return getHolidayForDatePeriod(holidays, checkDate, periodStart);
+  }, [holidays, checkDate, periodStart]);
+
+  // Missing check-in history for this classroom (from trackingStartDate up to today)
+  const missingHistory = useMemo(() => {
+    const room = classrooms.find((c) => c.id === selectedRoomId);
+    if (!room || timetables.length === 0) {
+      return { days: [], totalMissingPeriods: 0, effectiveStartDate: "" };
+    }
+    return computeRoomMissingHistory({
+      classroom: room,
+      timetable: timetables,
+      roomLogs: allRoomLogs,
+      holidays,
+      periods,
+      trackingStartDate: schoolProfile?.trackingStartDate,
+    });
+  }, [classrooms, selectedRoomId, timetables, allRoomLogs, holidays, periods, schoolProfile]);
+
+  // Auto-open Missing Check-in Popup once on login (after substitute modal closes, if any)
+  useEffect(() => {
+    if (
+      isRoomAuthenticated &&
+      selectedRoomId &&
+      hasLoadedRoomLogs &&
+      !showSubstituteModal &&
+      !hasAutoShownMissingPopup &&
+      missingHistory.totalMissingPeriods > 0
+    ) {
+      setShowMissingModal(true);
+      setHasAutoShownMissingPopup(true);
+    }
+  }, [
+    isRoomAuthenticated,
+    selectedRoomId,
+    hasLoadedRoomLogs,
+    showSubstituteModal,
+    hasAutoShownMissingPopup,
+    missingHistory.totalMissingPeriods,
+  ]);
+
+  const handleJumpToMissingPeriod = (targetDate: string, targetPeriod: number) => {
+    setEditingRecord(null);
+    setCheckDate(targetDate);
+    setIsDoublePeriod(false);
+    setPeriodStart(targetPeriod);
+    setPeriodEnd(targetPeriod);
+    setStatus("");
+    setAbsenceReason("");
+    setAbsenceNote("");
+    setLateNote("");
+    setShowMissingModal(false);
+    if (selectedRoomId) {
+      syncWithTimetable(selectedRoomId, targetDate, targetPeriod);
+    }
+    setTimeout(() => {
+      const formEl = document.getElementById("checkin-form");
+      if (formEl) {
+        formEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  };
+
+  // All room logs in the current term (unlocked for term-wide retroactive editing/deleting)
+  const roomTermLogs = useMemo(() => {
+    return allRoomLogs;
   }, [allRoomLogs]);
 
-  // Start editing a record (allowed within 7 days)
+  // Start editing a record (allowed throughout the current term; changes are logged in editHistory)
   const handleStartEdit = (record: AttendanceRecord) => {
-    if (!isWithin7DaysThai(record.date)) {
-      alert("รายการนี้ถูกบันทึกเกิน 7 วันแล้ว ไม่สามารถแก้ไขได้ (ตามระเบียบโรงเรียน)");
-      return;
-    }
     setEditingRecord(record);
     setCheckDate(record.date);
     setIsDoublePeriod(record.periodStart !== record.periodEnd);
@@ -391,12 +481,8 @@ export default function StudentCheckPage() {
     setLateNote("");
   };
 
-  // Delete a record (allowed within 7 days)
+  // Delete a record (allowed throughout the current term)
   const handleDeleteRecord = async (record: AttendanceRecord) => {
-    if (!isWithin7DaysThai(record.date)) {
-      alert("รายการนี้ถูกบันทึกเกิน 7 วันแล้ว ไม่สามารถลบได้ (ตามระเบียบโรงเรียน)");
-      return;
-    }
     const pLabel =
       record.periodStart === record.periodEnd
         ? `คาบที่ ${record.periodStart}`
@@ -943,6 +1029,13 @@ export default function StudentCheckPage() {
   const handleSubmitAttendance = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (currentPeriodHoliday) {
+      alert(
+        `ไม่สามารถบันทึกได้ เนื่องจากวัน/คาบนี้ถูกกำหนดเป็นวันหยุด/งดการเรียนการสอน (${currentPeriodHoliday.title})`
+      );
+      return;
+    }
+
     if (!selectedTeacherId) {
       alert("กรุณาเลือกชื่อครูผู้สอน");
       return;
@@ -1289,6 +1382,95 @@ export default function StudentCheckPage() {
         </div>
       )}
 
+      {/* Missing Check-in Retroactive Alert Modal (Student Login Popup) */}
+      {showMissingModal && missingHistory.totalMissingPeriods > 0 && (
+        <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-lg w-full shadow-2xl border border-rose-200 space-y-4 max-h-[88vh] flex flex-col">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center shadow-inner shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-800">
+                    แจ้งเตือนคาบที่ยังไม่ได้เช็คชื่อ
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    ห้อง <strong>{currentRoom?.gradeRoom}</strong> &bull; ค้างทั้งหมด{" "}
+                    <strong className="text-rose-600">
+                      {missingHistory.totalMissingPeriods} คาบ
+                    </strong>{" "}
+                    ({missingHistory.days.length} วัน)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMissingModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 overflow-y-auto flex-1 pr-1">
+              {missingHistory.days.map((dayGroup) => (
+                <div
+                  key={dayGroup.date}
+                  className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2"
+                >
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="text-slate-800 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-rose-600" />
+                      {dayGroup.date === todayStr ? "วันนี้ — " : ""}
+                      {formatThaiDateShort(dayGroup.date)}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px]">
+                      ค้าง {dayGroup.missingPeriods.length} คาบ
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {dayGroup.missingPeriods.map((mp) => (
+                      <div
+                        key={`${dayGroup.date}_${mp.period}`}
+                        className="p-2.5 rounded-xl bg-white border border-slate-200/80 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-800 truncate">
+                            <span className="text-rose-700">คาบ {mp.period}</span> &bull;{" "}
+                            {mp.subjectCode} {mp.subjectName}
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate">
+                            ครูผู้สอน: {mp.teacherName}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleJumpToMissingPeriod(dayGroup.date, mp.period)}
+                          className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-[11px] shrink-0 flex items-center gap-1 shadow-xs transition-all"
+                        >
+                          <span>ไปเช็คเลย</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowMissingModal(false)}
+              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all"
+            >
+              ปิดหน้าต่างนี้ (ไว้เก็บตกภายหลัง)
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="bg-gradient-to-r from-sky-700 via-sky-800 to-indigo-900 rounded-2xl p-6 text-white shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -1536,6 +1718,49 @@ export default function StudentCheckPage() {
             </div>
           </div>
 
+          {/* Missing Check-in Quick Reopen Bar */}
+          {missingHistory.totalMissingPeriods > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowMissingModal(true)}
+              className="w-full p-3.5 rounded-xl bg-rose-50 hover:bg-rose-100/80 border border-rose-200 text-rose-900 text-xs sm:text-sm flex items-center justify-between gap-3 transition-colors text-left shadow-xs"
+            >
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                <div>
+                  <span className="font-bold">
+                    ห้อง {currentRoom?.gradeRoom} มีคาบค้างเช็ค {missingHistory.totalMissingPeriods} คาบ
+                  </span>
+                  <span className="block text-[11px] text-rose-700">
+                    ({missingHistory.days.length} วัน) &bull; กดเพื่อดูรายการและเช็คย้อนหลังได้ทันที
+                  </span>
+                </div>
+              </div>
+              <span className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-bold shrink-0">
+                ดูรายการ
+              </span>
+            </button>
+          )}
+
+          {/* Holiday Lock Alert Banner */}
+          {currentPeriodHoliday && (
+            <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 flex items-start gap-3 shadow-sm">
+              <div className="w-10 h-10 rounded-xl bg-amber-200 text-amber-800 flex items-center justify-center shrink-0">
+                <CalendarOff className="w-5 h-5" />
+              </div>
+              <div className="text-xs sm:text-sm">
+                <div className="font-bold text-amber-950">
+                  วันหยุด / งดการเรียนการสอน: {currentPeriodHoliday.title}
+                </div>
+                <div className="text-amber-800 mt-0.5">
+                  {currentPeriodHoliday.scope === "all_day"
+                    ? `วันที่ ${formatThaiDateShort(checkDate)} เป็นวันหยุด/งดการสอนทั้งวัน — ระบบปิดการบันทึกในวันนี้`
+                    : `วันที่ ${formatThaiDateShort(checkDate)} งดการสอนคาบ ${(currentPeriodHoliday.periods || []).join(", ")} — ระบบปิดการบันทึกในคาบนี้`}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Auto Detect Notice Alert */}
           {autoDetectedNotice && (
             <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs sm:text-sm flex items-start gap-2.5">
@@ -1573,7 +1798,7 @@ export default function StudentCheckPage() {
                   <div className="font-bold text-sm sm:text-base text-amber-950 flex items-center gap-2">
                     <span>โหมดแก้ไขข้อมูลการเข้าสอน</span>
                     <span className="text-[11px] bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full font-semibold">
-                      แก้ไขได้ภายใน 7 วัน
+                      แก้ไขได้ตลอดภาคเรียน (บันทึกประวัติการแก้)
                     </span>
                   </div>
                   <div className="text-xs text-amber-800 mt-0.5">
@@ -2192,7 +2417,16 @@ export default function StudentCheckPage() {
                   <span>ยกเลิกโหมดแก้ไข</span>
                 </button>
               )}
-              {currentPeriodSpecialInfo ? (
+              {currentPeriodHoliday ? (
+                <button
+                  type="button"
+                  disabled
+                  className="w-full sm:w-auto px-6 py-3 bg-amber-100 text-amber-900 border border-amber-300 font-bold rounded-xl cursor-not-allowed text-xs sm:text-sm ml-auto flex items-center justify-center gap-2"
+                >
+                  <CalendarOff className="w-4 h-4" />
+                  <span>วันหยุด/งดการสอน [{currentPeriodHoliday.title}] &bull; ปิดการบันทึก</span>
+                </button>
+              ) : currentPeriodSpecialInfo ? (
                 <button
                   type="button"
                   disabled
@@ -2256,20 +2490,20 @@ export default function StudentCheckPage() {
                       : "text-slate-600 hover:text-slate-900"
                   }`}
                 >
-                  ย้อนหลัง 7 วันที่แก้ไขได้ ({room7DaysLogs.length})
+                  ทั้งหมดในภาคเรียนนี้ ({roomTermLogs.length})
                 </button>
               </div>
             </div>
 
             {/* Logs List */}
             {(() => {
-              const displayLogs = historyTab === "day" ? roomTodayLogs : room7DaysLogs;
+              const displayLogs = historyTab === "day" ? roomTodayLogs : roomTermLogs;
               if (displayLogs.length === 0) {
                 return (
                   <div className="text-center py-8 text-slate-400 text-sm">
                     {historyTab === "day"
                       ? `ยังไม่มีการบันทึกข้อมูลของห้องนี้ในวันที่ ${checkDate}`
-                      : "ยังไม่มีประวัติการบันทึกข้อมูลย้อนหลัง 7 วันของห้องนี้"}
+                      : "ยังไม่มีประวัติการบันทึกข้อมูลในภาคเรียนนี้ของห้องนี้"}
                   </div>
                 );
               }
@@ -2277,7 +2511,6 @@ export default function StudentCheckPage() {
               return (
                 <div className="divide-y divide-slate-100">
                   {displayLogs.map((log) => {
-                    const canEdit = isWithin7DaysThai(log.date);
                     const isCurrentlyEditing = editingRecord?.id === log.id;
                     return (
                       <div
@@ -2339,41 +2572,31 @@ export default function StudentCheckPage() {
                             </span>
                           )}
 
-                          {/* 7-Day Actions (Edit & Delete) */}
-                          {canEdit ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleStartEdit(log)}
-                                className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                                  isCurrentlyEditing
-                                    ? "bg-amber-600 text-white shadow-xs"
-                                    : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 active:scale-95"
-                                }`}
-                                title="แก้ไขข้อมูลการบันทึก (ภายใน 7 วัน)"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                                <span>{isCurrentlyEditing ? "กำลังแก้ไข" : "แก้ไข"}</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteRecord(log)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-300 active:scale-95 transition-all shadow-xs"
-                                title="ลบข้อมูลการบันทึกนี้ (ภายใน 7 วัน)"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                                <span>ลบ</span>
-                              </button>
-                            </div>
-                          ) : (
-                            <span
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium bg-slate-100 text-slate-400 border border-slate-200"
-                              title="บันทึกเกิน 7 วันแล้ว ไม่สามารถแก้ไขหรือลบได้"
+                          {/* Term-wide Actions (Edit & Delete; all edits logged in editHistory) */}
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(log)}
+                              className={`inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                                isCurrentlyEditing
+                                  ? "bg-amber-600 text-white shadow-xs"
+                                  : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 active:scale-95"
+                              }`}
+                              title="แก้ไขข้อมูลการบันทึก"
                             >
-                              <Lock className="w-3 h-3" />
-                              <span>เกิน 7 วัน</span>
-                            </span>
-                          )}
+                              <Edit3 className="w-3.5 h-3.5" />
+                              <span>{isCurrentlyEditing ? "กำลังแก้ไข" : "แก้ไข"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRecord(log)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-300 active:scale-95 transition-all shadow-xs"
+                              title="ลบข้อมูลการบันทึกนี้"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                              <span>ลบ</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
