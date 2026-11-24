@@ -7,12 +7,13 @@ import {
   ParsedTimetableResult,
 } from "@/lib/timetableParser";
 import {
+  getTerms,
   saveTerm,
   setActiveTerm,
   saveTeachers,
   saveSubjects,
   saveClassroom,
-  saveTimetable,
+  replaceTimetableForClassrooms,
   getClassrooms,
   getTeachers,
   getSubjects,
@@ -46,6 +47,8 @@ export default function SchoolTimetableImporter({
   const [activeTab, setActiveTab] = useState<"file" | "paste">("file");
   const [pasteText, setPasteText] = useState("");
   const [parsedResult, setParsedResult] = useState<ParsedTimetableResult | null>(null);
+  const [sheetInfo, setSheetInfo] = useState<{ totalSheets: number; fileName: string } | null>(null);
+  const [importSummaryMsg, setImportSummaryMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [importing, setImporting] = useState(false);
   const [importSuccess, setImportSuccess] = useState(false);
@@ -61,18 +64,50 @@ export default function SchoolTimetableImporter({
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMsg("");
     setParsedResult(null);
+    setSheetInfo(null);
     const file = e.target.files?.[0];
     if (!file) return;
 
     try {
-      if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
+      const lowerName = file.name.toLowerCase();
+      if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[firstSheetName];
-        const csvText = XLSX.utils.sheet_to_csv(sheet);
-        processText(csvText);
+        const sheetCsvParts: string[] = [];
+
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          if (!sheet) continue;
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          if (!csv.trim()) continue;
+
+          // If a sheet doesn't explicitly contain a "ตารางเรียน ... ม.X/Y" header inside cells,
+          // check whether its tab name indicates a classroom (e.g. "ม.1-2", "ม.1/2", "1-2")
+          const hasExplicitRoomHeader =
+            csv.includes("ตารางเรียน") && /ม\.\s*\d+\/\d+/.test(csv);
+          const hasWeekday =
+            csv.includes("จันทร์") || csv.includes("อังคาร") || csv.includes("พุธ");
+
+          if (!hasExplicitRoomHeader && hasWeekday) {
+            const tabMatch =
+              sheetName.match(/ม\.?\s*(\d+)\s*[\/\-_.]\s*(\d+)/) ||
+              sheetName.trim().match(/^(\d+)\s*[\/\-_]\s*(\d+)$/);
+            if (tabMatch) {
+              sheetCsvParts.push(`ตารางเรียน ชั้น ม. ${tabMatch[1]}/${tabMatch[2]}\n${csv}`);
+              continue;
+            }
+          }
+
+          sheetCsvParts.push(csv);
+        }
+
+        setSheetInfo({
+          totalSheets: workbook.SheetNames.length,
+          fileName: file.name,
+        });
+        processText(sheetCsvParts.join("\n"));
       } else {
+        setSheetInfo({ totalSheets: 1, fileName: file.name });
         const text = await file.text();
         processText(text);
       }
@@ -84,6 +119,7 @@ export default function SchoolTimetableImporter({
 
   const handlePasteProcess = () => {
     setErrorMsg("");
+    setSheetInfo(null);
     if (!pasteText.trim()) {
       setErrorMsg("กรุณาวางข้อความจากไฟล์ตารางสอนก่อนกดวิเคราะห์");
       return;
@@ -113,60 +149,163 @@ export default function SchoolTimetableImporter({
     setErrorMsg("");
 
     try {
-      // 1. Save and activate term
-      await saveTerm(parsedResult.term);
+      // 1. Resolve & save term (preserve existing term ID if same year & term)
+      const existingTerms = await getTerms();
+      const matchedTerm = existingTerms.find(
+        (t) => t.year === parsedResult.term.year && t.term === parsedResult.term.term
+      );
+      const finalTerm = matchedTerm
+        ? { ...matchedTerm, isActive: setActive ? true : matchedTerm.isActive }
+        : parsedResult.term;
+
+      await saveTerm(finalTerm);
       if (setActive) {
-        await setActiveTerm(parsedResult.term.id);
+        await setActiveTerm(finalTerm.id);
       }
 
-      // 2. Classrooms
+      // 2. Classrooms — preserve existing ID and PIN if classroom already exists
+      const existingClassrooms = await getClassrooms();
+      const classroomIdByGradeRoom = new Map<string, string>();
+      for (const ex of existingClassrooms) {
+        classroomIdByGradeRoom.set(ex.gradeRoom, ex.id);
+      }
+
       if (importClassrooms && parsedResult.classrooms.length > 0) {
-        const existingClassrooms = await getClassrooms();
         for (const cls of parsedResult.classrooms) {
-          const found = existingClassrooms.find((c) => c.gradeRoom === cls.gradeRoom);
+          const found = existingClassrooms.find(
+            (c) => c.gradeRoom === cls.gradeRoom || c.id === cls.id
+          );
           if (found) {
-            await saveClassroom({ ...cls, pinCode: found.pinCode || cls.pinCode });
+            classroomIdByGradeRoom.set(cls.gradeRoom, found.id);
+            await saveClassroom({
+              ...cls,
+              id: found.id,
+              pinCode: found.pinCode || cls.pinCode,
+            });
           } else {
+            classroomIdByGradeRoom.set(cls.gradeRoom, cls.id);
             await saveClassroom(cls);
           }
         }
       }
 
-      // 3. Teachers
+      // 3. Teachers — match ONLY by normalized fullName (never overwrite another teacher by code!)
+      const existingTeachers = await getTeachers();
+      const normalizeName = (s: string) => s.replace(/\s+/g, " ").trim();
+      const teacherByFullName = new Map<string, typeof existingTeachers[number]>();
+      let maxTeacherCodeNum = 0;
+
+      for (const ex of existingTeachers) {
+        teacherByFullName.set(normalizeName(ex.fullName), ex);
+        const m = ex.code?.match(/^T(\d+)$/i);
+        if (m) maxTeacherCodeNum = Math.max(maxTeacherCodeNum, Number(m[1]));
+      }
+
       if (importTeachers && parsedResult.teachers.length > 0) {
-        const existingTeachers = await getTeachers();
         const mergedTeachers = [...existingTeachers];
         for (const t of parsedResult.teachers) {
-          const idx = mergedTeachers.findIndex(
-            (ex) => ex.fullName === t.fullName || ex.code === t.code
-          );
+          const norm = normalizeName(t.fullName);
+          const idx = mergedTeachers.findIndex((ex) => normalizeName(ex.fullName) === norm);
           if (idx >= 0) {
-            mergedTeachers[idx] = { ...mergedTeachers[idx], ...t };
+            const ex = mergedTeachers[idx];
+            const keepExistingDept =
+              ex.department &&
+              ex.department !== "กลุ่มสาระการเรียนรู้ทั่วไป" &&
+              (!t.department || t.department === "กลุ่มสาระการเรียนรู้ทั่วไป");
+            const updated = {
+              ...ex,
+              prefix: ex.prefix || t.prefix,
+              department: keepExistingDept ? ex.department : t.department || ex.department,
+            };
+            mergedTeachers[idx] = updated;
+            teacherByFullName.set(norm, updated);
           } else {
-            mergedTeachers.push(t);
+            maxTeacherCodeNum += 1;
+            const newTeacher = {
+              ...t,
+              code: `T${String(maxTeacherCodeNum).padStart(3, "0")}`,
+            };
+            mergedTeachers.push(newTeacher);
+            teacherByFullName.set(norm, newTeacher);
           }
         }
         await saveTeachers(mergedTeachers);
       }
 
-      // 4. Subjects
+      // 4. Subjects — merge by code and union assignedClassroomIds
       if (importSubjects && parsedResult.subjects.length > 0) {
         const existingSubjects = await getSubjects();
         const mergedSubjects = [...existingSubjects];
         for (const s of parsedResult.subjects) {
+          const remappedRooms = (s.assignedClassroomIds || []).map((cid) => {
+            const matchedCls = parsedResult.classrooms.find((c) => c.id === cid);
+            return matchedCls
+              ? classroomIdByGradeRoom.get(matchedCls.gradeRoom) || cid
+              : cid;
+          });
           const idx = mergedSubjects.findIndex((ex) => ex.code === s.code);
           if (idx >= 0) {
-            mergedSubjects[idx] = { ...mergedSubjects[idx], ...s };
+            const ex = mergedSubjects[idx];
+            const unionRooms = Array.from(
+              new Set([...(ex.assignedClassroomIds || []), ...remappedRooms])
+            ).sort();
+            mergedSubjects[idx] = {
+              ...ex,
+              name: s.name && s.name !== s.code ? s.name : ex.name,
+              department:
+                s.department && s.department !== "กลุ่มสาระการเรียนรู้ทั่วไป"
+                  ? s.department
+                  : ex.department,
+              ...(unionRooms.length > 0 ? { assignedClassroomIds: unionRooms } : {}),
+            };
           } else {
-            mergedSubjects.push(s);
+            mergedSubjects.push({
+              ...s,
+              ...(remappedRooms.length > 0 ? { assignedClassroomIds: remappedRooms } : {}),
+            });
           }
         }
         await saveSubjects(mergedSubjects);
       }
 
-      // 5. Timetable Entries
+      // 5. Timetable Entries — normalize termId, classroomId, teacherId & safely replace per classroom
       if (parsedResult.timetableEntries.length > 0) {
-        await saveTimetable(parsedResult.timetableEntries);
+        const normalizedEntries = parsedResult.timetableEntries.map((entry) => {
+          const resolvedClassroomId =
+            classroomIdByGradeRoom.get(entry.gradeRoom) || entry.classroomId;
+          const periodSuffix =
+            entry.periodStart === entry.periodEnd
+              ? `p${entry.periodStart}`
+              : `p${entry.periodStart}_${entry.periodEnd}`;
+          const normalizedId = `tt_${resolvedClassroomId}_d${entry.dayOfWeek}_${periodSuffix}`;
+
+          // Match saved teacher record if available
+          const cleanTchName = normalizeName(
+            entry.teacherName.replace(/^(นางสาว|นาย|นาง|ครู)\s*/, "")
+          );
+          const matchedTch = teacherByFullName.get(cleanTchName);
+
+          return {
+            ...entry,
+            id: normalizedId,
+            termId: finalTerm.id,
+            classroomId: resolvedClassroomId,
+            teacherId: matchedTch ? matchedTch.id : entry.teacherId,
+            teacherName: matchedTch
+              ? `${matchedTch.prefix}${matchedTch.fullName}`
+              : entry.teacherName,
+          };
+        });
+
+        const { saved, deleted } = await replaceTimetableForClassrooms(
+          normalizedEntries,
+          finalTerm.id
+        );
+        setImportSummaryMsg(
+          `อัปเดตตารางสอน ${parsedResult.summary.totalClassrooms} ห้อง (${saved} คาบ` +
+            (deleted > 0 ? `, ล้างคาบเก่าที่เปลี่ยนออก ${deleted} คาบ` : "") +
+            `) เรียบร้อยแล้ว`
+        );
       }
 
       setImportSuccess(true);
@@ -219,8 +358,14 @@ export default function SchoolTimetableImporter({
                 นำเข้าข้อมูลตารางสอนเรียบร้อยแล้ว!
               </h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                ระบบได้ปรับปรุงข้อมูลครูผู้สอน รายวิชา ห้องเรียน และตารางสอนของ{" "}
-                <strong>{parsedResult?.summary.termTitle}</strong> เข้าสู่ระบบเรียบร้อยแล้ว
+                {importSummaryMsg ? (
+                  <span>{importSummaryMsg}</span>
+                ) : (
+                  <>
+                    ระบบได้ปรับปรุงข้อมูลครูผู้สอน รายวิชา ห้องเรียน และตารางสอนของ{" "}
+                    <strong>{parsedResult?.summary.termTitle}</strong> เข้าสู่ระบบเรียบร้อยแล้ว
+                  </>
+                )}
               </p>
             </div>
           ) : (
@@ -266,6 +411,9 @@ export default function SchoolTimetableImporter({
                   <input
                     type="file"
                     accept=".csv, .txt, .xlsx, .xls"
+                    onClick={(e) => {
+                      (e.currentTarget as HTMLInputElement).value = "";
+                    }}
                     onChange={handleFileUpload}
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
@@ -276,7 +424,7 @@ export default function SchoolTimetableImporter({
                     คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่
                   </div>
                   <div className="text-xs text-slate-500 mt-1">
-                    รองรับไฟล์ที่ Export ออกมาจากโปรแกรมจัดตารางสอน (นามสกุล .csv, .txt, .xlsx)
+                    รองรับไฟล์ Excel หลายแท็บ (อ่านทุกแท็บอัตโนมัติ) และไฟล์ .csv, .txt
                   </div>
                 </div>
               )}
@@ -304,16 +452,24 @@ export default function SchoolTimetableImporter({
               {/* Parsed Result Preview */}
               {parsedResult && (
                 <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4 animate-in fade-in">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                       <h4 className="font-bold text-slate-800 text-sm sm:text-base">
                         ผลการวิเคราะห์โครงสร้างตารางสอน
                       </h4>
                     </div>
-                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200">
-                      {parsedResult.summary.termTitle}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {sheetInfo && sheetInfo.totalSheets > 1 && (
+                        <span className="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-semibold border border-sky-200 flex items-center gap-1">
+                          <Layers className="w-3 h-3" />
+                          อ่านครบ {sheetInfo.totalSheets} แท็บ
+                        </span>
+                      )}
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200">
+                        {parsedResult.summary.termTitle}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Stat KPI Pills */}
@@ -358,6 +514,29 @@ export default function SchoolTimetableImporter({
                       </div>
                     </div>
                   </div>
+
+                  {/* Detected Classrooms List */}
+                  {parsedResult.classrooms.length > 0 && (
+                    <div className="p-3 bg-sky-50/70 rounded-xl border border-sky-200/80 space-y-2 text-xs">
+                      <div className="font-bold text-sky-900 flex items-center justify-between">
+                        <span>ห้องเรียนที่พบในไฟล์ ({parsedResult.classrooms.length} ห้อง):</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                        {parsedResult.classrooms.map((cls) => (
+                          <span
+                            key={cls.id}
+                            className="px-2 py-0.5 rounded-md bg-white border border-sky-200 text-sky-800 font-semibold text-[11px]"
+                          >
+                            {cls.gradeRoom}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-sky-800/90 leading-relaxed">
+                        ✓ ระบบจะอัปเดตตารางสอนเฉพาะ <strong>{parsedResult.classrooms.length} ห้องนี้</strong>{" "}
+                        (ล้างคาบเก่าของห้องเหล่านี้ที่เปลี่ยนไปแล้วออกอัตโนมัติ) โดยไม่กระทบห้องเรียนอื่นที่ไม่อยู่ในไฟล์ และไม่ลบประวัติการเช็คชื่อย้อนหลัง
+                      </p>
+                    </div>
+                  )}
 
                   {/* Options Checkboxes */}
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2 text-xs">

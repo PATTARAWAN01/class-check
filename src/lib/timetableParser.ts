@@ -113,7 +113,7 @@ export function parseSchoolTimetableText(
 
   // Scan for term in text
   for (const row of rows) {
-    const text = row[0] || "";
+    const text = row.join(" ");
     const termMatch = text.match(/ภาคเรียนที่\s*(\d+)\/(\d+)/);
     if (termMatch) {
       detectedTerm = termMatch[1];
@@ -129,7 +129,8 @@ export function parseSchoolTimetableText(
     termString = `${detectedTerm}/${detectedYear}`;
   }
 
-  const termId = `term_${detectedYear}_${detectedTerm}`;
+  // Match production termId convention (e.g. term_2_2569)
+  const termId = `term_${detectedTerm}_${detectedYear}`;
   const term: AcademicTerm = {
     id: termId,
     year: detectedYear,
@@ -142,25 +143,80 @@ export function parseSchoolTimetableText(
   const subjectsMap = new Map<string, Subject>();
   const classroomsMap = new Map<string, Classroom>();
   const roomSubjectTeacherMap = new Map<string, string>();
+  const subjectClassroomsMap = new Map<string, Set<string>>();
 
-  // Pass 0: Detect Official Personnel Table if present
-  const teacherHeaderIdx = rows.findIndex(
-    (r) => r.some((c) => c.includes("ลำดับรวม")) && r.some((c) => c.includes("ชื่อ - สกุล"))
-  );
-  const maxTimetableRowIdx = teacherHeaderIdx >= 0 ? teacherHeaderIdx : rows.length;
+  const addClassroomToSubject = (subjectCode: string, classroomId: string) => {
+    if (!subjectCode || !classroomId) return;
+    if (!subjectClassroomsMap.has(subjectCode)) {
+      subjectClassroomsMap.set(subjectCode, new Set<string>());
+    }
+    subjectClassroomsMap.get(subjectCode)!.add(classroomId);
+  };
 
-  if (teacherHeaderIdx >= 0) {
+  const extractClassroomHeader = (row: string[]) => {
+    const joined = row.map((c) => c.trim()).filter(Boolean).join(" ");
+    if (!joined.includes("ตารางเรียน")) return null;
+    const match = joined.match(/ม\.\s*(\d+)\/(\d+)/);
+    if (!match) return null;
+    const gradeNum = match[1];
+    const roomNum = match[2];
+    const grade = `ม.${gradeNum}`;
+    const gradeRoom = `ม.${gradeNum}/${roomNum}`;
+    // Match production classroomId convention (e.g. m1_1)
+    const id = `m${gradeNum}_${roomNum}`;
+    return { id, grade, roomNum, gradeRoom, gradeNum };
+  };
+
+  // Pass 0: Detect Official Personnel Table(s) anywhere across all sheets
+  {
+    let inPersonnelTable = false;
+    let nameColIdx = 2;
+    let deptColIdx = 3;
     let tNum = 1;
-    for (let i = teacherHeaderIdx + 1; i < rows.length; i++) {
+
+    for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (r.length >= 4 && r[2] && r[3]) {
-        const rawName = r[2].trim();
-        let dept = r[3].trim();
-        if (!dept || rawName.includes("ชื่อ - สกุล") || rawName.includes("ข้าราชการครู")) continue;
+      const joined = r.map((c) => c.trim()).filter(Boolean).join(" ");
+
+      if (
+        r.some((c) => c.includes("ลำดับรวม")) &&
+        r.some((c) => c.includes("ชื่อ - สกุล") || c.includes("ชื่อ-สกุล"))
+      ) {
+        inPersonnelTable = true;
+        const foundNameIdx = r.findIndex(
+          (c) => c.includes("ชื่อ - สกุล") || c.includes("ชื่อ-สกุล")
+        );
+        const foundDeptIdx = r.findIndex((c) => c.includes("กลุ่มสาระ"));
+        nameColIdx = foundNameIdx >= 0 ? foundNameIdx : 2;
+        deptColIdx = foundDeptIdx >= 0 ? foundDeptIdx : 3;
+        continue;
+      }
+
+      if (
+        joined.includes("ตารางเรียน") ||
+        joined.includes("รายการวิชาเรียนประจำชั้น") ||
+        (joined.includes("ตารางสอน") && !joined.includes("สารสนเทศ"))
+      ) {
+        inPersonnelTable = false;
+        continue;
+      }
+
+      if (inPersonnelTable && r[nameColIdx] && r[deptColIdx]) {
+        const rawName = r[nameColIdx].trim();
+        let dept = r[deptColIdx].trim();
+        if (
+          !dept ||
+          rawName.includes("ชื่อ - สกุล") ||
+          rawName.includes("ชื่อ-สกุล") ||
+          rawName.includes("ข้าราชการครู")
+        ) {
+          continue;
+        }
         if (!dept.startsWith("กลุ่มสาระการเรียนรู้")) {
           dept = "กลุ่มสาระการเรียนรู้" + dept;
         }
         const { prefix, name: cleanName } = splitPrefixAndName(rawName);
+        if (!cleanName) continue;
         const code = `T${String(tNum++).padStart(3, "0")}`;
         teachersMap.set(cleanName, {
           id: `tch_${cleanName.replace(/\s+/g, "_")}`,
@@ -174,36 +230,61 @@ export function parseSchoolTimetableText(
   }
 
   let currentClassroom = "";
+  let currentClassroomId = "";
   let inSubjectList = false;
 
-  // Pass 1: Extract Classrooms, Subjects, and Teachers list
-  for (let i = 0; i < maxTimetableRowIdx; i++) {
+  // Pass 1: Extract Classrooms, Subjects, and Teachers list across all sheets
+  for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const firstCol = row[0] || "";
+    const firstCol = (row[0] || "").trim();
+    const rowJoined = row.map((c) => c.trim()).filter(Boolean).join(" ");
 
-    if (firstCol.includes("ตารางเรียน ชั้น ม.")) {
+    const clsHeader = extractClassroomHeader(row);
+    if (clsHeader) {
       inSubjectList = false;
-      const match = firstCol.match(/ม\.\s*(\d+)\/(\d+)/);
-      if (match) {
-        const grade = `ม.${match[1]}`;
-        const roomNum = match[2];
-        const gradeRoom = `ม.${match[1]}/${roomNum}`;
+      currentClassroom = clsHeader.gradeRoom;
+      currentClassroomId = clsHeader.id;
+      if (!classroomsMap.has(clsHeader.gradeRoom)) {
+        classroomsMap.set(clsHeader.gradeRoom, {
+          id: clsHeader.id,
+          gradeRoom: clsHeader.gradeRoom,
+          grade: clsHeader.grade,
+          room: clsHeader.roomNum,
+          pinCode: `${clsHeader.gradeNum}10${clsHeader.roomNum}`,
+        });
+      }
+      continue;
+    }
+
+    if (rowJoined.includes("รายการวิชาเรียนประจำชั้น")) {
+      inSubjectList = true;
+      const listMatch = rowJoined.match(/ม\.\s*(\d+)\/(\d+)/);
+      if (listMatch) {
+        const gradeNum = listMatch[1];
+        const roomNum = listMatch[2];
+        const gradeRoom = `ม.${gradeNum}/${roomNum}`;
+        const id = `m${gradeNum}_${roomNum}`;
         currentClassroom = gradeRoom;
+        currentClassroomId = id;
         if (!classroomsMap.has(gradeRoom)) {
           classroomsMap.set(gradeRoom, {
-            id: `cls_m${match[1]}_${roomNum}`,
+            id,
             gradeRoom,
-            grade,
+            grade: `ม.${gradeNum}`,
             room: roomNum,
-            pinCode: `${match[1]}10${roomNum}`,
+            pinCode: `${gradeNum}10${roomNum}`,
           });
         }
       }
       continue;
     }
 
-    if (firstCol.includes("รายการวิชาเรียนประจำชั้น")) {
-      inSubjectList = true;
+    if (
+      rowJoined.includes("สารสนเทศพื้นฐาน") ||
+      (row.some((c) => c.includes("ลำดับรวม")) &&
+        row.some((c) => c.includes("ชื่อ - สกุล") || c.includes("ชื่อ-สกุล")))
+    ) {
+      inSubjectList = false;
       continue;
     }
 
@@ -212,27 +293,36 @@ export function parseSchoolTimetableText(
         firstCol === "รหัสวิชา" ||
         firstCol.startsWith("ตารางเรียน") ||
         firstCol.startsWith("ตารางสอน") ||
-        firstCol.startsWith("ลงชื่อ")
+        firstCol.startsWith("ลงชื่อ") ||
+        firstCol === "คาบที่" ||
+        firstCol === "เวลา"
       ) {
-        if (firstCol.startsWith("ตารางเรียน") || firstCol.startsWith("ตารางสอน")) {
+        if (
+          firstCol.startsWith("ตารางเรียน") ||
+          firstCol.startsWith("ตารางสอน") ||
+          firstCol === "คาบที่"
+        ) {
           inSubjectList = false;
         }
         continue;
       }
 
-      const code = row[0];
-      const name = row[1];
-      const teacherName = row[2];
+      const code = (row[0] || "").trim();
+      const name = (row[1] || "").trim();
+      const teacherName = (row[2] || "").trim();
 
-      if (code && name && code.length >= 4) {
+      if (code && name && code.length >= 4 && !code.includes("ลำดับ")) {
         const dept = getDepartmentBySubject(code, name);
         if (!subjectsMap.has(code)) {
           subjectsMap.set(code, {
-            id: `subj_${code.trim()}`,
+            id: `subj_${code}`,
             code,
             name,
             department: dept,
           });
+        }
+        if (currentClassroomId) {
+          addClassroomToSubject(code, currentClassroomId);
         }
 
         if (teacherName && teacherName.length > 2) {
@@ -257,7 +347,7 @@ export function parseSchoolTimetableText(
   // Also scan teacher tables for teacher names
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const firstCol = row[0] || "";
+    const firstCol = (row[0] || "").trim();
     if (firstCol.includes("ตารางสอน") && !firstCol.includes("ตารางเรียน")) {
       const match = firstCol.match(/ตารางสอน\s+([^\s]+)\s+([^\s]+(?:\s+[^\s]+)?)\s+ภาคเรียน/);
       if (match) {
@@ -276,65 +366,107 @@ export function parseSchoolTimetableText(
     }
   }
 
-  // Pass 2: Extract periods from weekly grid
-  const rawPeriodsList: {
-    dayOfWeek: number;
-    period: number;
-    gradeRoom: string;
-    subjectCode: string;
-    teacherFullName: string;
-    roomLocation: string;
-  }[] = [];
+  // Pass 2: Extract periods from weekly grid across all sheets
+  const rawPeriodsMap = new Map<
+    string,
+    {
+      dayOfWeek: number;
+      period: number;
+      gradeRoom: string;
+      subjectCode: string;
+      teacherFullName: string;
+      roomLocation: string;
+    }
+  >();
 
   currentClassroom = "";
+  currentClassroomId = "";
   inSubjectList = false;
+
+  const defaultPeriodCols = [
+    { period: 1, colIdx: 2 },
+    { period: 2, colIdx: 3 },
+    { period: 3, colIdx: 4 },
+    { period: 4, colIdx: 5 },
+    { period: 5, colIdx: 7 },
+    { period: 6, colIdx: 8 },
+    { period: 7, colIdx: 9 },
+    { period: 8, colIdx: 10 },
+  ];
+  let activePeriodCols = defaultPeriodCols;
+  let activeDayColIdx = 0;
 
   const dayNames: Record<string, number> = {
     จันทร์: 1,
+    วันจันทร์: 1,
     อังคาร: 2,
+    วันอังคาร: 2,
     พุธ: 3,
+    วันพุธ: 3,
     "พฤหัสฯ": 4,
+    พฤหัส: 4,
+    พฤหัสบดี: 4,
+    วันพฤหัสบดี: 4,
+    "วันพฤหัสฯ": 4,
     ศุกร์: 5,
+    วันศุกร์: 5,
   };
 
-  for (let i = 0; i < maxTimetableRowIdx; i++) {
+  for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const firstCol = row[0] || "";
+    const rowJoined = row.map((c) => c.trim()).filter(Boolean).join(" ");
 
-    if (firstCol.includes("ตารางเรียน ชั้น ม.")) {
+    const clsHeader = extractClassroomHeader(row);
+    if (clsHeader) {
       inSubjectList = false;
-      const match = firstCol.match(/ม\.\s*(\d+)\/(\d+)/);
-      if (match) {
-        currentClassroom = `ม.${match[1]}/${match[2]}`;
-      }
+      currentClassroom = clsHeader.gradeRoom;
+      currentClassroomId = clsHeader.id;
+      activePeriodCols = defaultPeriodCols;
+      activeDayColIdx = 0;
       continue;
     }
 
-    if (firstCol.includes("รายการวิชาเรียนประจำชั้น")) {
+    if (
+      rowJoined.includes("รายการวิชาเรียนประจำชั้น") ||
+      rowJoined.includes("สารสนเทศพื้นฐาน") ||
+      (row.some((c) => c.includes("ลำดับรวม")) &&
+        row.some((c) => c.includes("ชื่อ - สกุล") || c.includes("ชื่อ-สกุล")))
+    ) {
       inSubjectList = true;
       continue;
     }
 
     if (inSubjectList) continue;
 
-    if (currentClassroom && dayNames[firstCol]) {
-      const dayOfWeek = dayNames[firstCol];
-      const periodCols = [
-        { period: 1, colIdx: 2 },
-        { period: 2, colIdx: 3 },
-        { period: 3, colIdx: 4 },
-        { period: 4, colIdx: 5 },
-        { period: 5, colIdx: 7 },
-        { period: 6, colIdx: 8 },
-        { period: 7, colIdx: 9 },
-        { period: 8, colIdx: 10 },
-      ];
+    // Dynamically detect period column indices from the "คาบที่" header row if present
+    const periodHeaderColIdx = row.findIndex((c) => c.trim() === "คาบที่");
+    if (currentClassroom && periodHeaderColIdx >= 0) {
+      const detectedCols: { period: number; colIdx: number }[] = [];
+      for (let col = periodHeaderColIdx + 1; col < row.length; col++) {
+        const val = (row[col] || "").trim();
+        if (/^[1-9]$/.test(val)) {
+          detectedCols.push({ period: Number(val), colIdx: col });
+        }
+      }
+      if (detectedCols.length >= 6) {
+        activePeriodCols = detectedCols;
+        activeDayColIdx = periodHeaderColIdx;
+      }
+      continue;
+    }
 
-      for (const p of periodCols) {
-        const cell = row[p.colIdx];
+    const dayCell = (row[activeDayColIdx] || row[0] || "").trim();
+    if (currentClassroom && dayNames[dayCell]) {
+      const dayOfWeek = dayNames[dayCell];
+
+      for (const p of activePeriodCols) {
+        const cell = (row[p.colIdx] || "").trim();
         if (!cell || cell === "พักเที่ยง" || cell === "โฮมรูม") continue;
 
-        const lines = cell.split("\n").map((l) => l.trim()).filter(Boolean);
+        const lines = cell
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
         if (lines.length === 0) continue;
 
         const codeOrAct = lines[0];
@@ -351,8 +483,8 @@ export function parseSchoolTimetableText(
           continue;
         }
 
-        let teacherShort = lines[1] || "";
-        let roomLoc = lines[2] || "";
+        const teacherShort = lines[1] || "";
+        const roomLoc = lines[2] || "";
 
         let teacherFullName = "";
         if (roomSubjectTeacherMap.has(`${currentClassroom}_${codeOrAct}`)) {
@@ -389,8 +521,13 @@ export function parseSchoolTimetableText(
             department: getDepartmentBySubject(codeOrAct),
           });
         }
+        if (currentClassroomId) {
+          addClassroomToSubject(codeOrAct, currentClassroomId);
+        }
 
-        rawPeriodsList.push({
+        // Deduplicate by classroom + day + period
+        const periodKey = `${currentClassroom}_${dayOfWeek}_${p.period}`;
+        rawPeriodsMap.set(periodKey, {
           dayOfWeek,
           period: p.period,
           gradeRoom: currentClassroom,
@@ -399,6 +536,16 @@ export function parseSchoolTimetableText(
           roomLocation: roomLoc,
         });
       }
+    }
+  }
+
+  const rawPeriodsList = Array.from(rawPeriodsMap.values());
+
+  // Attach assignedClassroomIds to each parsed subject
+  for (const [code, subj] of Array.from(subjectsMap.entries())) {
+    const assigned = subjectClassroomsMap.get(code);
+    if (assigned && assigned.size > 0) {
+      subj.assignedClassroomIds = Array.from(assigned).sort();
     }
   }
 
@@ -473,14 +620,22 @@ export function parseSchoolTimetableText(
     }
   }
 
+  // Sort classrooms naturally (e.g. ม.1/1, ม.1/2, ..., ม.6/4)
+  const sortedClassrooms = Array.from(classroomsMap.values()).sort((a, b) => {
+    const ga = Number(a.grade.replace(/\D/g, "")) || 0;
+    const gb = Number(b.grade.replace(/\D/g, "")) || 0;
+    if (ga !== gb) return ga - gb;
+    return (Number(a.room) || 0) - (Number(b.room) || 0);
+  });
+
   return {
     term,
-    classrooms: Array.from(classroomsMap.values()),
+    classrooms: sortedClassrooms,
     teachers: Array.from(teachersMap.values()),
     subjects: Array.from(subjectsMap.values()),
     timetableEntries,
     summary: {
-      totalClassrooms: classroomsMap.size,
+      totalClassrooms: sortedClassrooms.length,
       totalTeachers: teachersMap.size,
       totalSubjects: subjectsMap.size,
       totalPeriods: timetableEntries.length,

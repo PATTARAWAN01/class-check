@@ -268,11 +268,14 @@ export async function saveTeacher(teacher: Teacher): Promise<void> {
 
 export async function saveTeachers(teachers: Teacher[]): Promise<void> {
   if (db) {
-    const batch = writeBatch(db);
-    teachers.forEach((t) => {
-      batch.set(doc(db!, "teachers", t.id), t);
-    });
-    await batch.commit();
+    for (let i = 0; i < teachers.length; i += 400) {
+      const chunk = teachers.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((t) => {
+        batch.set(doc(db!, "teachers", t.id), cleanForFirestore(t));
+      });
+      await batch.commit();
+    }
   }
   setLocal(STORAGE_KEYS.TEACHERS, teachers);
 }
@@ -331,11 +334,14 @@ export async function saveSubject(subject: Subject): Promise<void> {
 
 export async function saveSubjects(subjects: Subject[]): Promise<void> {
   if (db) {
-    const batch = writeBatch(db);
-    subjects.forEach((s) => {
-      batch.set(doc(db!, "subjects", s.id), s);
-    });
-    await batch.commit();
+    for (let i = 0; i < subjects.length; i += 400) {
+      const chunk = subjects.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((s) => {
+        batch.set(doc(db!, "subjects", s.id), cleanForFirestore(s));
+      });
+      await batch.commit();
+    }
   }
   setLocal(STORAGE_KEYS.SUBJECTS, subjects);
 }
@@ -433,13 +439,82 @@ export async function getTimetable(termId?: string): Promise<TimetableEntry[]> {
 
 export async function saveTimetable(entries: TimetableEntry[]): Promise<void> {
   if (db) {
-    const batch = writeBatch(db);
-    entries.forEach((tt) => {
-      batch.set(doc(db!, "timetables", tt.id), tt);
-    });
-    await batch.commit();
+    for (let i = 0; i < entries.length; i += 400) {
+      const chunk = entries.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((tt) => {
+        batch.set(doc(db!, "timetables", tt.id), cleanForFirestore(tt));
+      });
+      await batch.commit();
+    }
   }
   setLocal(STORAGE_KEYS.TIMETABLE, entries);
+}
+
+/**
+ * Safely replaces timetable entries ONLY for the classrooms present in `entries`
+ * (within `termId`). Old/stale entries for those classrooms (e.g. a double period
+ * that changed or split into single periods, or removed periods) are deleted from
+ * Firestore, while classrooms NOT included in `entries` remain untouched.
+ */
+export async function replaceTimetableForClassrooms(
+  entries: TimetableEntry[],
+  termId: string
+): Promise<{ saved: number; deleted: number }> {
+  const importedClassroomIds = new Set(entries.map((e) => e.classroomId));
+  const importedGradeRooms = new Set(entries.map((e) => e.gradeRoom));
+  const newIds = new Set(entries.map((e) => e.id));
+  let deletedCount = 0;
+
+  if (db) {
+    // 1. Find and delete obsolete entries for the imported classrooms in this term
+    const q = query(collection(db, "timetables"), where("termId", "==", termId));
+    const snapshot = await getDocs(q);
+    const staleDocIds: string[] = [];
+
+    snapshot.docs.forEach((d) => {
+      const data = d.data() as TimetableEntry;
+      const belongsToImportedRoom =
+        importedClassroomIds.has(data.classroomId) ||
+        importedGradeRooms.has(data.gradeRoom);
+      if (belongsToImportedRoom && !newIds.has(d.id)) {
+        staleDocIds.push(d.id);
+      }
+    });
+
+    for (let i = 0; i < staleDocIds.length; i += 400) {
+      const chunk = staleDocIds.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((docId) => {
+        batch.delete(doc(db!, "timetables", docId));
+      });
+      await batch.commit();
+    }
+    deletedCount = staleDocIds.length;
+
+    // 2. Write all new entries in chunks of 400 (Firestore max is 500 per batch)
+    for (let i = 0; i < entries.length; i += 400) {
+      const chunk = entries.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((tt) => {
+        batch.set(doc(db!, "timetables", tt.id), cleanForFirestore(tt));
+      });
+      await batch.commit();
+    }
+  }
+
+  // 3. Merge into local storage cache without losing non-imported classrooms
+  const existingLocal = getLocal<TimetableEntry[]>(STORAGE_KEYS.TIMETABLE, INITIAL_TIMETABLE);
+  const kept = existingLocal.filter((e) => {
+    if (e.termId !== termId) return true;
+    return (
+      !importedClassroomIds.has(e.classroomId) &&
+      !importedGradeRooms.has(e.gradeRoom)
+    );
+  });
+  setLocal(STORAGE_KEYS.TIMETABLE, [...kept, ...entries]);
+
+  return { saved: entries.length, deleted: deletedCount };
 }
 
 export async function deleteTimetableEntry(id: string): Promise<void> {
