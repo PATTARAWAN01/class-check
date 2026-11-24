@@ -28,6 +28,7 @@ import {
   getSchoolProfile,
   subscribeAttendance,
   getSubstituteAssignments,
+  subscribeSubstituteAssignments,
   getTimetable,
 } from "@/lib/storage";
 import { exportAttendanceToExcel } from "@/lib/excel";
@@ -102,11 +103,17 @@ export default function StatisticsPage() {
     }
     init();
 
-    // Subscribe to attendance real-time
+    // Subscribe to attendance & substitute assignments real-time
     const unsubscribe = subscribeAttendance((records) => {
       setAllAttendance(records);
     });
-    return () => unsubscribe();
+    const unsubscribeSubs = subscribeSubstituteAssignments((subRecords) => {
+      setSubstitutes(subRecords);
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeSubs();
+    };
   }, []);
 
   // Filter records by Term and Teacher Report Mode (Daily vs Date Range)

@@ -36,6 +36,7 @@ import {
   getAttendanceLogs,
   subscribeAttendance,
   getSubstituteAssignments,
+  subscribeSubstituteAssignments,
 } from "@/lib/storage";
 import {
   Classroom,
@@ -285,10 +286,14 @@ export default function StudentCheckPage() {
 
         if (isMorningSchoolWindow && Date.now() - lastSync > syncInterval) {
           sessionStorage.setItem(lastSyncKey, Date.now().toString());
+          const todayStr = getThaiDateString();
           fetch(`/api/substitute/cron-sync?date=${encodeURIComponent(todayStr)}`, { method: "POST" })
             .then((res) => res.json())
             .then((data) => {
-              if (data?.success && (data?.insertedCount > 0 || data?.updatedCount > 0)) {
+              if (
+                data?.success &&
+                ((data?.totalSynced || 0) > 0 || (data?.deletedCount || 0) > 0)
+              ) {
                 getSubstituteAssignments().then((refreshed) => {
                   setSubstitutes(refreshed);
                   const effectiveRoomId = savedRoomId || localSavedRoomId;
@@ -296,9 +301,7 @@ export default function StudentCheckPage() {
                     const roomSubs = refreshed.filter(
                       (s) => s.classroomId === effectiveRoomId && s.date === todayStr
                     );
-                    if (roomSubs.length > 0) {
-                      setRoomSubstitutesToday(roomSubs);
-                    }
+                    setRoomSubstitutesToday(roomSubs);
                   }
                 });
               }
@@ -310,7 +313,25 @@ export default function StudentCheckPage() {
     init();
   }, []);
 
-  // Real-time online synchronization of attendance logs for this room
+  // Real-time online synchronization of attendance logs & substitute assignments
+  useEffect(() => {
+    const unsubscribeSubs = subscribeSubstituteAssignments((liveSubs) => {
+      setSubstitutes(liveSubs);
+      if (selectedRoomId) {
+        const todayStr = getThaiDateString();
+        const currentRoom = classrooms.find((c) => c.id === selectedRoomId);
+        const roomSubs = liveSubs.filter(
+          (s) =>
+            (s.classroomId === selectedRoomId ||
+              (currentRoom && s.gradeRoom === currentRoom.gradeRoom)) &&
+            s.date === todayStr
+        );
+        setRoomSubstitutesToday(roomSubs);
+      }
+    });
+    return () => unsubscribeSubs();
+  }, [selectedRoomId, classrooms]);
+
   useEffect(() => {
     if (isRoomAuthenticated && selectedRoomId) {
       const unsubscribe = subscribeAttendance((allRecords) => {
@@ -1003,9 +1024,15 @@ export default function StudentCheckPage() {
       const parsedDate = new Date(checkDate);
       const dayOfWeek = parsedDate.getDay() || 1;
 
+      const selectedTeacherFullName = teacher ? `${teacher.prefix}${teacher.fullName}` : "";
       const isSub = Boolean(
         currentSubstitute &&
-          selectedTeacherId === currentSubstitute.substituteTeacherId
+          currentSubstitute.substituteTeacherName &&
+          ((currentSubstitute.substituteTeacherId &&
+            selectedTeacherId === currentSubstitute.substituteTeacherId) ||
+            (selectedTeacherFullName &&
+              selectedTeacherFullName.replace(/\s+/g, "") ===
+                currentSubstitute.substituteTeacherName.replace(/\s+/g, "")))
       );
 
       // Auto-detect if record already exists for this room, date, and period (prevents duplicates & records audit log)

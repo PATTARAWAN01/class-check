@@ -143,42 +143,68 @@ export async function parseTimetableExcel(
 ): Promise<TimetableEntry[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
-  const firstSheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rows: any[] = XLSX.utils.sheet_to_json(worksheet);
 
-  return rows
+  // Read across all sheets in the template workbook
+  const allRows: any[] = [];
+  for (const sheetName of workbook.SheetNames) {
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) continue;
+    const sheetRows: any[] = XLSX.utils.sheet_to_json(worksheet);
+    allRows.push(...sheetRows);
+  }
+
+  return allRows
     .filter((r) => r["ห้องเรียน (เช่น ม.1/1)"] || r["Classroom"] || r["ห้อง"])
-    .map((r, index) => {
+    .map((r) => {
       const pStart = Number(
         r["คาบเริ่มต้น"] || r["PeriodStart"] || r["คาบ"] || 1
       );
-      const pEnd = Number(
+      const pEndRaw = Number(
         r["คาบสิ้นสุด (กรณีคาบคู่)"] || r["PeriodEnd"] || pStart
       );
-      const dayVal = Number(r["วัน (1=จันทร์, 2=อังคาร, 3=พุธ, 4=พฤหัสฯ, 5=ศุกร์)"] || r["Day"] || 1);
-      const gradeRoom = String(
+      const pEnd = pEndRaw >= pStart ? pEndRaw : pStart;
+      const dayRaw = Number(
+        r["วัน (1=จันทร์, 2=อังคาร, 3=พุธ, 4=พฤหัสฯ, 5=ศุกร์)"] || r["Day"] || 1
+      );
+      const dayOfWeek = dayRaw >= 1 && dayRaw <= 5 ? dayRaw : 1;
+
+      const rawRoom = String(
         r["ห้องเรียน (เช่น ม.1/1)"] || r["Classroom"] || r["ห้อง"] || "ม.1/1"
       ).trim();
+      const roomMatch = rawRoom.match(/(?:ม\.?\s*)?(\d+)\s*\/\s*(\d+)/);
+      const gradeRoom = roomMatch ? `ม.${roomMatch[1]}/${roomMatch[2]}` : rawRoom;
+      const classroomId = roomMatch
+        ? `m${roomMatch[1]}_${roomMatch[2]}`
+        : rawRoom.replace(/[\s\.\/]/g, "_");
+
       const subjectCode = String(r["รหัสวิชา"] || r["SubjectCode"] || "").trim();
       const subjectName = String(r["ชื่อวิชา"] || r["SubjectName"] || "").trim();
       const teacherName = String(
         r["ชื่อครูผู้สอน"] || r["TeacherName"] || r["ครู"] || ""
       ).trim();
+      const cleanTeacherBare = teacherName
+        .replace(/^(นางสาว|นาย|นาง|ครู)\s*/, "")
+        .trim();
+      const roomLocation = String(
+        r["สถานที่"] || r["ห้องเรียน/สถานที่"] || r["RoomLocation"] || ""
+      ).trim();
+
+      const periodSuffix = pStart === pEnd ? `p${pStart}` : `p${pStart}_${pEnd}`;
 
       return {
-        id: `tt_imp_${Date.now()}_${index}`,
+        id: `tt_${classroomId}_d${dayOfWeek}_${periodSuffix}`,
         termId,
-        dayOfWeek: dayVal >= 1 && dayVal <= 5 ? dayVal : 1,
+        dayOfWeek,
         periodStart: pStart,
-        periodEnd: pEnd >= pStart ? pEnd : pStart,
-        classroomId: `cls_${gradeRoom.replace(/[\.\/]/g, "_")}`,
+        periodEnd: pEnd,
+        classroomId,
         gradeRoom,
         subjectId: `subj_${subjectCode}`,
         subjectCode,
         subjectName,
-        teacherId: `tch_${teacherName}`,
+        teacherId: `tch_${cleanTeacherBare.replace(/\s+/g, "_")}`,
         teacherName,
+        ...(roomLocation ? { roomLocation } : {}),
       };
     });
 }

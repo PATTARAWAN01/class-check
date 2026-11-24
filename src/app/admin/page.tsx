@@ -1039,17 +1039,138 @@ export default function AdminPage() {
     if (!file) return;
     try {
       const activeTerm = terms.find((t) => t.isActive) || terms[0];
-      const parsed = await parseTimetableExcel(file, activeTerm?.id || "term_default");
+      const termId = activeTerm?.id || "term_2_2569";
+      const parsed = await parseTimetableExcel(file, termId);
       if (parsed.length === 0) {
         showNotice("ไม่พบข้อมูลตารางสอนในไฟล์ที่อัปโหลด กรุณาใช้เทมเพลตมาตรฐาน", "error");
         return;
       }
-      await saveTimetable(parsed);
+
+      // Normalize classroomId & teacherId against existing master records
+      const normalized: TimetableEntry[] = parsed.map((entry) => {
+        const matchedCls = classrooms.find(
+          (c) => c.gradeRoom === entry.gradeRoom || c.id === entry.classroomId
+        );
+        const resolvedClassroomId = matchedCls ? matchedCls.id : entry.classroomId;
+        const periodSuffix =
+          entry.periodStart === entry.periodEnd
+            ? `p${entry.periodStart}`
+            : `p${entry.periodStart}_${entry.periodEnd}`;
+        const cleanBare = entry.teacherName.replace(/^(นางสาว|นาย|นาง|ครู)\s*/, "").trim();
+        const matchedTch = teachers.find(
+          (t) =>
+            t.fullName.replace(/\s+/g, " ").trim() === cleanBare ||
+            `${t.prefix}${t.fullName}`.replace(/\s+/g, " ").trim() === entry.teacherName.trim()
+        );
+        const matchedSubj = subjects.find((s) => s.code === entry.subjectCode);
+
+        return {
+          ...entry,
+          id: `tt_${resolvedClassroomId}_d${entry.dayOfWeek}_${periodSuffix}`,
+          termId,
+          classroomId: resolvedClassroomId,
+          gradeRoom: matchedCls ? matchedCls.gradeRoom : entry.gradeRoom,
+          subjectId: matchedSubj ? matchedSubj.id : entry.subjectId,
+          subjectName: entry.subjectName || matchedSubj?.name || entry.subjectCode,
+          teacherId: matchedTch ? matchedTch.id : entry.teacherId,
+          teacherName: matchedTch ? `${matchedTch.prefix}${matchedTch.fullName}` : entry.teacherName,
+        };
+      });
+
+      // Upsert-only diff (updates/adds rows in template without deleting unmentioned periods)
+      const normStr = (s?: string) => (s || "").replace(/\s+/g, " ").trim();
+      const slotKey = (tt: TimetableEntry) =>
+        `${normStr(tt.gradeRoom)}|${tt.dayOfWeek}|${tt.periodStart}|${tt.periodEnd}`;
+      const existingBySlot = new Map<string, TimetableEntry>();
+      timetable
+        .filter((tt) => tt.termId === termId)
+        .forEach((tt) => existingBySlot.set(slotKey(tt), tt));
+
+      const toUpsert: TimetableEntry[] = [];
+      const toDeleteIds: string[] = [];
+      const changes: TimetableChangeItem[] = [];
+      let addedCount = 0;
+      let modifiedCount = 0;
+      let unchangedCount = 0;
+      const affectedRooms = new Set<string>();
+
+      for (const inc of normalized) {
+        const ex = existingBySlot.get(slotKey(inc));
+        if (!ex) {
+          toUpsert.push(inc);
+          addedCount += 1;
+          affectedRooms.add(inc.gradeRoom);
+          changes.push({
+            type: "added",
+            gradeRoom: inc.gradeRoom,
+            dayOfWeek: inc.dayOfWeek,
+            periodStart: inc.periodStart,
+            periodEnd: inc.periodEnd,
+            newEntry: inc,
+          });
+        } else {
+          const changedFields: string[] = [];
+          if (normStr(ex.subjectCode) !== normStr(inc.subjectCode) || normStr(ex.subjectName) !== normStr(inc.subjectName)) {
+            changedFields.push("วิชา");
+          }
+          if (normStr(ex.teacherName) !== normStr(inc.teacherName)) {
+            changedFields.push("ครูผู้สอน");
+          }
+          if (normStr(ex.roomLocation) !== normStr(inc.roomLocation)) {
+            changedFields.push("ห้องเรียน/สถานที่");
+          }
+          if (changedFields.length === 0) {
+            unchangedCount += 1;
+          } else {
+            toUpsert.push(inc);
+            if (ex.id !== inc.id) toDeleteIds.push(ex.id);
+            modifiedCount += 1;
+            affectedRooms.add(inc.gradeRoom);
+            changes.push({
+              type: "modified",
+              gradeRoom: inc.gradeRoom,
+              dayOfWeek: inc.dayOfWeek,
+              periodStart: inc.periodStart,
+              periodEnd: inc.periodEnd,
+              oldEntry: ex,
+              newEntry: inc,
+              changedFields,
+            });
+          }
+        }
+      }
+
+      if (toUpsert.length === 0) {
+        showNotice(`ข้อมูลจากเทมเพลตเหมือนกับตารางสอนเดิมทั้งหมด (${unchangedCount} คาบ)`);
+        return;
+      }
+
+      await applyTimetableDiff({ toUpsert, toDeleteIds });
+      await addTimetableUpdateLog({
+        id: `ttlog_${Date.now()}_tpl`,
+        termId,
+        createdAt: new Date().toISOString(),
+        source: "excel_import",
+        sourceLabel: `นำเข้าจากเทมเพลต Excel (${file.name})`,
+        summary: {
+          added: addedCount,
+          modified: modifiedCount,
+          removed: 0,
+          unchanged: unchangedCount,
+          affectedClassrooms: Array.from(affectedRooms),
+        },
+        changes,
+      });
+
       await loadAllData();
-      showNotice(`นำเข้าข้อมูลตารางสอนสำเร็จ ${parsed.length} รายการ`);
+      showNotice(
+        `นำเข้าเทมเพลตตารางสอนสำเร็จ (เพิ่มใหม่ ${addedCount} คาบ, แก้ไข ${modifiedCount} คาบ, ข้ามคาบเดิม ${unchangedCount} คาบ)`
+      );
     } catch (err) {
       console.error(err);
       showNotice("เกิดข้อผิดพลาดในการอ่านไฟล์ตารางสอน", "error");
+    } finally {
+      e.target.value = "";
     }
   };
 
@@ -1100,10 +1221,77 @@ export default function AdminPage() {
     e.preventDefault();
     if (!editingTeacher || !editingTeacher.fullName.trim()) return;
 
-    const updated = teachers.map((t) => (t.id === editingTeacher.id ? editingTeacher : t));
+    const oldTeacher = teachers.find((t) => t.id === editingTeacher.id);
+    const cleanPrefix = editingTeacher.prefix.trim();
+    const cleanFullName = editingTeacher.fullName.trim();
+    const cleanedTeacher: Teacher = {
+      ...editingTeacher,
+      prefix: cleanPrefix,
+      fullName: cleanFullName,
+    };
+
+    const updated = teachers.map((t) => (t.id === cleanedTeacher.id ? cleanedTeacher : t));
     await saveTeachers(updated);
     setTeachers(updated);
-    showNotice(`แก้ไขข้อมูลครู ${editingTeacher.prefix}${editingTeacher.fullName} สำเร็จ`);
+
+    // Auto-sync updated teacher prefix/fullName to matching timetable entries & log history
+    let syncedCount = 0;
+    if (oldTeacher) {
+      const oldDisplay = `${oldTeacher.prefix}${oldTeacher.fullName}`.trim();
+      const newDisplay = `${cleanPrefix}${cleanFullName}`.trim();
+      if (oldDisplay !== newDisplay) {
+        const matchingEntries = timetable.filter(
+          (tt) => tt.teacherId === cleanedTeacher.id || tt.teacherName.trim() === oldDisplay
+        );
+        if (matchingEntries.length > 0) {
+          const updatedEntries: TimetableEntry[] = matchingEntries.map((tt) => ({
+            ...tt,
+            teacherId: cleanedTeacher.id,
+            teacherName: newDisplay,
+          }));
+          await applyTimetableDiff({ toUpsert: updatedEntries, toDeleteIds: [] });
+
+          const activeTermObj = terms.find((t) => t.isActive) || terms[0];
+          const changes: TimetableChangeItem[] = matchingEntries.map((oldEntry, idx) => ({
+            type: "modified",
+            gradeRoom: oldEntry.gradeRoom,
+            dayOfWeek: oldEntry.dayOfWeek,
+            periodStart: oldEntry.periodStart,
+            periodEnd: oldEntry.periodEnd,
+            oldEntry,
+            newEntry: updatedEntries[idx],
+            changedFields: ["ครูผู้สอน"],
+          }));
+          const affectedRooms = Array.from(new Set(matchingEntries.map((m) => m.gradeRoom)));
+          const newLog: TimetableUpdateLog = {
+            id: `ttlog_${Date.now()}_tch`,
+            termId: activeTermObj?.id || matchingEntries[0].termId || "term_2_2569",
+            createdAt: new Date().toISOString(),
+            source: "manual_edit",
+            sourceLabel: `ซิงก์จากการแก้ไขข้อมูลครู ${oldDisplay} → ${newDisplay}`,
+            summary: {
+              added: 0,
+              modified: updatedEntries.length,
+              removed: 0,
+              affectedClassrooms: affectedRooms,
+            },
+            changes,
+          };
+          await addTimetableUpdateLog(newLog);
+
+          const updatedMap = new Map(updatedEntries.map((u) => [u.id, u]));
+          setTimetable((prev) => prev.map((tt) => updatedMap.get(tt.id) || tt));
+          setTimetableUpdateLogs((prev) => [newLog, ...prev]);
+          syncedCount = updatedEntries.length;
+        }
+      }
+    }
+
+    showNotice(
+      syncedCount > 0
+        ? `แก้ไขข้อมูลครู ${cleanPrefix}${cleanFullName} สำเร็จ (ซิงก์อัปเดตในตารางสอน ${syncedCount} คาบ)`
+        : `แก้ไขข้อมูลครู ${cleanPrefix}${cleanFullName} สำเร็จ`
+    );
     setEditingTeacher(null);
   };
 

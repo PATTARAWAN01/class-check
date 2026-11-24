@@ -1,7 +1,7 @@
 import { Teacher, Classroom, Subject, TimetableEntry, AcademicTerm, SubstituteAssignment, SubstituteLeaveType } from "@/types";
-import { getTeachers, getClassrooms, getSubjects, getTimetable, getTerms, saveSubstituteAssignment } from "@/lib/storage";
+import { getTeachers, getClassrooms, getSubjects, getTerms, saveSubstituteAssignment, deleteSubstituteAssignment } from "@/lib/storage";
 import { db } from "@/lib/firebase";
-import { doc, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 import { getThaiDateString } from "@/lib/dateUtils";
 
 const NONGWUASO_SUB_BASE_URL = "https://nongwuaso-sub.netlify.app";
@@ -25,6 +25,7 @@ export interface SyncResult {
   totalSynced: number;
   assignedCount: number;
   unassignedCount: number;
+  deletedCount?: number;
   departmentsCount: number;
   syncedAt: string;
   message: string;
@@ -72,10 +73,16 @@ export function parsePlanText(text: string): { code: string; cls: string; room: 
   return { code, cls, room: room.replace(/^ห้อง\s?/, "") };
 }
 
+export interface NongwuasoFetchResult {
+  rows: NongwuasoParsedRow[];
+  succeededDepts: Set<string>;
+  allDeptsSucceeded: boolean;
+}
+
 /**
  * Fetch and parse raw substitute teaching plans directly from nongwuaso-sub.netlify.app API
  */
-export async function fetchNongwuasoSubData(targetDate?: string): Promise<NongwuasoParsedRow[]> {
+export async function fetchNongwuasoSubDataWithMeta(targetDate?: string): Promise<NongwuasoFetchResult> {
   const queryDate = targetDate || getThaiDateString();
 
   // 1. Fetch all departments
@@ -86,6 +93,7 @@ export async function fetchNongwuasoSubData(targetDate?: string): Promise<Nongwu
   const depts: { id: string; name: string }[] = await deptsRes.json();
 
   const allRows: NongwuasoParsedRow[] = [];
+  const succeededDepts = new Set<string>();
 
   // 2. Fetch each department's state
   for (const d of depts) {
@@ -95,6 +103,7 @@ export async function fetchNongwuasoSubData(targetDate?: string): Promise<Nongwu
       });
       if (!res.ok) continue;
       const data = await res.json();
+      succeededDepts.add(d.name);
       const S = data?.state;
       if (!S || !S.plans) continue;
 
@@ -138,7 +147,16 @@ export async function fetchNongwuasoSubData(targetDate?: string): Promise<Nongwu
     }
   }
 
-  return allRows;
+  return {
+    rows: allRows,
+    succeededDepts,
+    allDeptsSucceeded: depts.length > 0 && succeededDepts.size === depts.length,
+  };
+}
+
+export async function fetchNongwuasoSubData(targetDate?: string): Promise<NongwuasoParsedRow[]> {
+  const { rows } = await fetchNongwuasoSubDataWithMeta(targetDate);
+  return rows;
 }
 
 /**
@@ -148,8 +166,9 @@ export async function syncNongwuasoSubstitutes(targetDate?: string): Promise<Syn
   const finalDate = targetDate || getThaiDateString();
 
   try {
-    // 1. Fetch raw data from Netlify
-    const rawRows = await fetchNongwuasoSubData(finalDate);
+    // 1. Fetch raw data from Netlify (tracks which departments responded cleanly)
+    const { rows: rawRows, succeededDepts, allDeptsSucceeded } =
+      await fetchNongwuasoSubDataWithMeta(finalDate);
 
     // 2. Load Class Check data for matching
     const [teachers, classrooms, subjects, terms] = await Promise.all([
@@ -160,9 +179,9 @@ export async function syncNongwuasoSubstitutes(targetDate?: string): Promise<Syn
     ]);
 
     const activeTerm = terms.find((t) => t.isActive) || terms[0];
-    const termId = activeTerm?.id || "term_default";
+    const termId = activeTerm?.id || "term_2_2569";
 
-    const parsedDate = new Date(finalDate);
+    const parsedDate = new Date(`${finalDate}T12:00:00+07:00`);
     const dayOfWeek = parsedDate.getDay() || 1;
 
     // Helper matchers
@@ -198,6 +217,8 @@ export async function syncNongwuasoSubstitutes(targetDate?: string): Promise<Syn
     let totalSynced = 0;
     let assignedCount = 0;
     let unassignedCount = 0;
+    let deletedCount = 0;
+    const activeSyncedIds = new Set<string>();
     const details: SyncResult["details"] = [];
 
     // 3. Process each row and save cleanly with deterministic ID (clean overwrite on re-sync)
@@ -255,6 +276,7 @@ export async function syncNongwuasoSubstitutes(targetDate?: string): Promise<Syn
       };
 
       await saveSubstituteAssignment(subAssignment);
+      activeSyncedIds.add(deterministicId);
       totalSynced++;
 
       details.push({
@@ -267,18 +289,48 @@ export async function syncNongwuasoSubstitutes(targetDate?: string): Promise<Syn
       });
     }
 
+    // 3B. Safely remove stale auto-synced records (ONLY `sub_auto_${finalDate}_...`)
+    // that were cancelled or moved on nongwuaso-sub. Never touches manual Excel/OCR records,
+    // and only cleans up departments that responded cleanly with HTTP 200.
+    if (db && succeededDepts.size > 0) {
+      try {
+        const autoPrefix = `sub_auto_${finalDate}_`;
+        const q = query(
+          collection(db, "substitute_assignments"),
+          where("date", "==", finalDate)
+        );
+        const existingSnap = await getDocs(q);
+        for (const d of existingSnap.docs) {
+          if (!d.id.startsWith(autoPrefix)) continue;
+          if (activeSyncedIds.has(d.id)) continue;
+          const existingData = d.data() as SubstituteAssignment;
+          // Only delete if all departments succeeded OR this specific department succeeded
+          if (allDeptsSucceeded || (existingData.department && succeededDepts.has(existingData.department))) {
+            await deleteSubstituteAssignment(d.id);
+            deletedCount++;
+          }
+        }
+      } catch (cleanupErr) {
+        console.warn("Stale auto-sync substitute cleanup warning:", cleanupErr);
+      }
+    }
+
     const syncedAt = new Date().toISOString();
+    const cleanupNote = deletedCount > 0 ? `, ล้างคาบที่ถูกยกเลิกออก ${deletedCount} คาบ` : "";
     const result: SyncResult = {
       success: true,
       date: finalDate,
       totalSynced,
       assignedCount,
       unassignedCount,
+      deletedCount,
       departmentsCount: new Set(rawRows.map((r) => r.dept)).size,
       syncedAt,
       message:
         totalSynced > 0
-          ? `ซิงก์ข้อมูลสอนแทนวันที่ ${finalDate} สำเร็จทั้งหมด ${totalSynced} คาบ (จัดสอนแทนแล้ว ${assignedCount} คาบ, ยังไม่มีผู้แทน ${unassignedCount} คาบ)`
+          ? `ซิงก์ข้อมูลสอนแทนวันที่ ${finalDate} สำเร็จทั้งหมด ${totalSynced} คาบ (จัดสอนแทนแล้ว ${assignedCount} คาบ, ยังไม่มีผู้แทน ${unassignedCount} คาบ${cleanupNote})`
+          : deletedCount > 0
+          ? `ไม่พบรายการจัดสอนแทนสำหรับวันที่ ${finalDate} (ล้างรายการที่ถูกยกเลิกออก ${deletedCount} คาบ)`
           : `ไม่พบรายการจัดสอนแทนในระบบ nongwuaso-sub สำหรับวันที่ ${finalDate}`,
       details,
     };
