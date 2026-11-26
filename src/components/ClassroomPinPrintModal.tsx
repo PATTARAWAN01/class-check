@@ -321,7 +321,7 @@ export default function ClassroomPinPrintModal({
                               โรงเรียนหนองวัวซอพิทยาคม
                             </div>
                             <div className="text-[8px] text-sky-700 font-semibold leading-tight">
-                              Class Check &bull; บัตรประจำตัวแทนห้องเช็คชื่อ
+                              ระบบบันทึกการสอนของครูผู้สอน &bull; บัตรประจำตัวแทนห้องเช็คชื่อ
                             </div>
                           </div>
                         </div>
@@ -401,7 +401,7 @@ export default function ClassroomPinPrintModal({
 
                       {/* 4. Footer link & Info */}
                       <div className="border-t border-slate-100 pt-1 text-[8px] text-slate-400 flex items-center justify-between">
-                        <span>Class Check &bull; รหัสห้อง: {room.id}</span>
+                        <span>ระบบบันทึกการสอนฯ &bull; รหัสห้อง: {room.id}</span>
                         <span>nwsp-class-check.vercel.app</span>
                       </div>
                     </div>

@@ -170,7 +170,7 @@ export default function ClassroomQrPrint({
                           โรงเรียนหนองวัวซอพิทยาคม
                         </div>
                         <div className="text-[10px] text-sky-700 font-semibold">
-                          Class Check &bull; จุดบันทึกเวลาสอน
+                          ระบบบันทึกการสอนของครูผู้สอน
                         </div>
                       </div>
                     </div>

@@ -243,7 +243,7 @@ export default function HolidaysAndBackupPanel({
       const text = await file.text();
       const parsed = JSON.parse(text) as SystemBackupPayload;
       if (!parsed || !parsed.data || typeof parsed.data !== "object") {
-        showNotice("ไฟล์นี้ไม่ใช่ไฟล์ Backup ของระบบ Class Check ที่ถูกต้อง", "error");
+        showNotice("ไฟล์นี้ไม่ใช่ไฟล์ Backup ของระบบบันทึกการสอนของครูผู้สอนที่ถูกต้อง", "error");
         return;
       }
       setRestorePayload(parsed);

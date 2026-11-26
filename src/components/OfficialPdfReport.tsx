@@ -934,7 +934,7 @@ export default function OfficialPdfReport({
           {/* Official Document Footer */}
           <div className="mt-4 pt-1.5 print:mt-0.5 print:pt-0.5 border-t border-slate-200 flex items-center justify-between text-[9px] print:text-[5.5pt] text-slate-400 print:text-slate-500">
             <div>
-              <span>ระบบ Class Check &bull; {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"}</span>
+              <span>ระบบบันทึกการสอนของครูผู้สอน &bull; {schoolProfile.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"}</span>
             </div>
             <div>
               <span>พิมพ์เมื่อ: {new Date().toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} น.</span>

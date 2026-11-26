@@ -12,8 +12,8 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Class Check - โรงเรียนหนองวัวซอพิทยาคม",
-  description: "ระบบเช็คเวลาเข้าสอนของครู โรงเรียนหนองวัวซอพิทยาคม โดยนักเรียน พร้อมหน้าสถิติสาธารณะและส่งออกรายงาน",
+  title: "ระบบบันทึกการสอนของครูผู้สอน - โรงเรียนหนองวัวซอพิทยาคม",
+  description: "ระบบบันทึกการสอนของครูผู้สอน โรงเรียนหนองวัวซอพิทยาคม โดยนักเรียน พร้อมหน้าสถิติสาธารณะและส่งออกรายงาน",
   manifest: "/manifest.json",
   icons: {
     icon: "/favicon.png",
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Class Check",
+    title: "บันทึกการสอน",
   },
 };
 
@@ -48,7 +48,7 @@ export default function RootLayout({
         <footer className="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500 no-print">
           <div className="max-w-7xl mx-auto px-4">
             <p className="font-medium text-slate-600">
-              Class Check &bull; โรงเรียนหนองวัวซอพิทยาคม
+              ระบบบันทึกการสอนของครูผู้สอน &bull; โรงเรียนหนองวัวซอพิทยาคม
             </p>
             <p className="mt-1 text-slate-400">
               Created and Developed by Pattarawan Suwanvapee

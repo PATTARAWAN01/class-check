@@ -74,11 +74,11 @@ export default function Navbar() {
                   className="w-full h-full object-contain"
                 />
               </div>
-              <div className="flex flex-col">
-                <span className="font-bold text-slate-800 text-lg leading-tight group-hover:text-sky-600 transition-colors">
-                  Class Check
+              <div className="flex flex-col min-w-0">
+                <span className="font-bold text-slate-800 text-sm sm:text-base leading-tight group-hover:text-sky-600 transition-colors truncate">
+                  ระบบบันทึกการสอนของครูผู้สอน
                 </span>
-                <span className="text-xs text-slate-500 line-clamp-1">
+                <span className="text-[11px] sm:text-xs text-slate-500 line-clamp-1">
                   {profile?.schoolName || "โรงเรียนหนองวัวซอพิทยาคม"}
                 </span>
               </div>

@@ -92,7 +92,7 @@ export default function PwaInstallPrompt() {
           >
             <img
               src="/LOGO-N.png"
-              alt="Class Check"
+              alt="ระบบบันทึกการสอนของครูผู้สอน"
               width={44}
               height={44}
               style={{ width: "44px", height: "44px", maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
@@ -102,7 +102,7 @@ export default function PwaInstallPrompt() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-slate-800 text-sm truncate">
-                ติดตั้ง Class Check
+                ติดตั้งระบบบันทึกการสอนของครูผู้สอน
               </span>
               <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-700">
                 PWA

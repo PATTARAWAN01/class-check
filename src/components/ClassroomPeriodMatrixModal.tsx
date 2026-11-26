@@ -592,7 +592,7 @@ export default function ClassroomPeriodMatrixModal({
 
           {/* Footer Note */}
           <div className="mt-1.5 text-right text-[8.5px] text-slate-500">
-            เอกสารสรุปอัตโนมัติจากระบบ Class Check &bull; พิมพ์เมื่อ {formatThaiDateLong(getThaiDateString())}
+            เอกสารสรุปอัตโนมัติจากระบบบันทึกการสอนของครูผู้สอน &bull; พิมพ์เมื่อ {formatThaiDateLong(getThaiDateString())}
           </div>
         </div>
 
